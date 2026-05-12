@@ -1,0 +1,498 @@
+{
+  "name": "Mark Platforms with subworkflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -336,
+        -128
+      ],
+      "id": "7eb7d951-f7e2-4854-bea0-832a9abf69fd",
+      "name": "Cron Trigger (Every 30 Min)"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "14APDP6_qTYw-CVudoINhxJkXZCex48dQTIjtUZnI1Bc",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2115521256,
+          "mode": "list",
+          "cachedResultName": "dummydata",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14APDP6_qTYw-CVudoINhxJkXZCex48dQTIjtUZnI1Bc/edit#gid=2115521256"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "processed",
+              "lookupValue": "false"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -128,
+        -128
+      ],
+      "id": "8e115ac9-abbe-4d55-a54e-d9499851458a",
+      "name": "Load Accounts from Control Sheet",
+      "retryOnFail": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HbrveSfbHGrReiP2",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "limit": 1,
+        "filtersUI": {
+          "values": {
+            "filterBy": "search",
+            "search": "={{ $json.Email }}"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        512,
+        336
+      ],
+      "id": "5858efc0-f61c-4131-946d-b8d8eb946899",
+      "name": "Outlook | Search Messages",
+      "webhookId": "d626b425-8dc0-4a90-8942-8efd9ec72be2",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "WX2Gc3SdlVrt0M4s",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        80,
+        -128
+      ],
+      "id": "13a8e85a-8f5b-4581-b1ba-cd91e65a9f55",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "14APDP6_qTYw-CVudoINhxJkXZCex48dQTIjtUZnI1Bc",
+          "mode": "list",
+          "cachedResultName": "updated_8_2026Auto",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14APDP6_qTYw-CVudoINhxJkXZCex48dQTIjtUZnI1Bc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2115521256,
+          "mode": "list",
+          "cachedResultName": "dummydata",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14APDP6_qTYw-CVudoINhxJkXZCex48dQTIjtUZnI1Bc/edit#gid=2115521256"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Platform": "={{ $json.Platform }}",
+            "processed": "true",
+            "row_number": "={{ $json.row_number }}"
+          },
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Platform",
+              "displayName": "Platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "processed",
+              "displayName": "processed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1344,
+        -96
+      ],
+      "id": "8a7af206-9503-4b83-91a6-9955ed95f08e",
+      "name": "Update row in sheet1",
+      "retryOnFail": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HbrveSfbHGrReiP2",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.Email }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        512,
+        112
+      ],
+      "id": "2e82cb19-7b26-484b-965e-b6b4fdcfe78c",
+      "name": "Gmail API | Search Messages1",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "JS9USX9PiQUaF2Ex",
+          "name": "Gmail account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.Email }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        496,
+        -336
+      ],
+      "id": "91121343-6400-4e10-b10b-4e4220c7bc14",
+      "name": "Gmail API | Search Messages7",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "rFfGY0Xv3R87IMIX",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.Email }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        512,
+        -112
+      ],
+      "id": "0082df6f-c0cc-4598-a115-35d08e6441ce",
+      "name": "Gmail API | Search Messages3",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "ortZFia9m4Q1vQmB",
+          "name": "Gmail account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        832,
+        -128
+      ],
+      "id": "ca89fb3d-0181-4d58-99af-3c28d171d083",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const row_number = $('Loop Over Items').item.json.row_number;\n\n// Get all input items\nconst allItems = $input.all();\n\n// Split input\nconst totalItems = allItems.slice(0, -1); // first N-1 items\nconst outlookItem = allItems[allItems.length - 1]?.json; // last item\n\n// Calculate total from first items\nconst total = totalItems.reduce((sum, item) => {\n  return sum + (item.json.resultSizeEstimate || 0);\n}, 0);\n\n// Detect if Outlook is empty\nconst isOutlookEmpty =\n  !outlookItem ||\n  Object.keys(outlookItem).length === 0;\n\n// Determine Platform\nlet Platform;\n\nif (isOutlookEmpty && total > 0) {\n  Platform = 'gmail';\n} else if (!isOutlookEmpty && total <= 0) {\n  Platform = 'outlook';\n} else if (!isOutlookEmpty && total > 0) {\n  Platform = ['gmail', 'outlook'];\n} else if (isOutlookEmpty && total <= 0) {\n  Platform = 'None';\n}\n\n// Return ONE object\nreturn [\n  {\n    json: {\n      totalResultSizeEstimate: total,\n      Platform,\n      row_number\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        -96
+      ],
+      "id": "d96de4b5-3481-488c-9931-4bda3a0356da",
+      "name": "Normalize Gmail Message IDs"
+    }
+  ],
+  "pinData": {
+    "Cron Trigger (Every 30 Min)": [
+      {
+        "json": {
+          "timestamp": "2026-02-07T03:45:28.773-05:00",
+          "Readable date": "February 7th 2026, 3:45:28 am",
+          "Readable time": "3:45:28 am",
+          "Day of week": "Saturday",
+          "Year": "2026",
+          "Month": "February",
+          "Day of month": "07",
+          "Hour": "03",
+          "Minute": "45",
+          "Second": "28",
+          "Timezone": "America/New_York (UTC-05:00)"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Cron Trigger (Every 30 Min)": {
+      "main": [
+        [
+          {
+            "node": "Load Accounts from Control Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Accounts from Control Sheet": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Outlook | Search Messages",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail API | Search Messages1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail API | Search Messages3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail API | Search Messages7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outlook | Search Messages": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Update row in sheet1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail API | Search Messages1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Gmail API | Search Messages7": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail API | Search Messages3": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Normalize Gmail Message IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Gmail Message IDs": {
+      "main": [
+        [
+          {
+            "node": "Update row in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "6458840c-8caa-4e7d-8637-7c3ab1b7c44e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ac1e8879b68b274e118cf9677096a9439e605feacdcd5794bbf0d9084edaead7"
+  },
+  "id": "BIlCkflvGjWNrgmN_EtjT",
+  "tags": []
+}

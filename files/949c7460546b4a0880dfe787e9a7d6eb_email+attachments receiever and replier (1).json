@@ -1,0 +1,2735 @@
+{
+  "name": "email+attachments receiever and replier",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "-from:celestials070@gmail.com"
+        },
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -576,
+        -448
+      ],
+      "id": "2b5678a3-03b4-464e-a1cd-409e5db2e3ff",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "rFfGY0Xv3R87IMIX",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "-from:celestialtechd@gmail.com"
+        },
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -576,
+        -304
+      ],
+      "id": "39e57ff9-cdf8-4ee0-ac69-ff8321be4fe6",
+      "name": "Gmail Trigger1",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "ortZFia9m4Q1vQmB",
+          "name": "Gmail account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "-from:zafarzafarzeb@gmail.com"
+        },
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -576,
+        -144
+      ],
+      "id": "1f5b5aeb-1187-4c61-87bc-03dca870eb79",
+      "name": "Gmail Trigger2",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "JS9USX9PiQUaF2Ex",
+          "name": "Gmail account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4",
+          "mode": "list",
+          "cachedResultName": "GPT-4"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=make a question statement from the below text:\n{{ $json.message_text }}\n{{ $json.image_details }}\n"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        864,
+        16
+      ],
+      "id": "79c22004-cb1d-487f-b613-a0f1e83f3ff1",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "DYI6nHiTMq1tDsDv",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "text": "What's in this image? explain in detail",
+        "inputType": "base64",
+        "binaryPropertyName": "=attachment_0",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        1536,
+        -240
+      ],
+      "id": "2213a40f-fb5c-46f9-893a-81399b0101a0",
+      "name": "Analyze image",
+      "credentials": {
+        "openAiApi": {
+          "id": "DYI6nHiTMq1tDsDv",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        384,
+        16
+      ],
+      "id": "fa2626e2-f01a-431f-9a51-c7dcb821f8f0",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all input items\nconst items = $input.all();\n\nlet aiText = '';\nlet attachments = [];\n\n// Loop through items to find AI text and binary files\nfor (const item of items) {\n\n  // ---- Extract AI text ----\n  if (Array.isArray(item.json?.content)) {\n    // Case like input1\n    aiText = item.json.content[0]?.text || aiText;\n  } else if (Array.isArray(item.json?.output)) {\n    // Case like input2\n    aiText = item.json.output[0]?.content[0]?.text || aiText;\n  } else if (Array.isArray(item.json) && Array.isArray(item.json[0]?.content)) {\n    // Sometimes input comes nested\n    aiText = item.json[0].content[0]?.text || aiText;\n  }\n\n  // ---- Extract attachments metadata ----\n  if (item.binary && Object.keys(item.binary).length > 0) {\n    for (const [key, b] of Object.entries(item.binary)) {\n      attachments.push({\n        key,                         // attachment_0, attachment_1, etc.\n        fileName: b.fileName || null,\n        mimeType: b.mimeType || null,\n        fileSize: b.fileSize || null,\n        fileExtension: b.fileExtension || null,\n        id: b.id || null,\n        url: b.url || b.filePath || null\n      });\n    }\n  }\n}\n\n// ---- Find the email item ----\nconst emailItem = items.find(i => typeof i.json?.message_text === 'string');\n\n// ---- Build unified output ----\nconst output = emailItem ? {\n  ...emailItem.json,\n  attachment_text_details: aiText,\n  image_details: '',       // keep if you want separate image description\n  attachments,\n  attachment_count: attachments.length,\n  has_attachments: attachments.length > 0\n} : {\n  attachment_text_details: aiText,\n  attachments,\n  attachment_count: attachments.length,\n  has_attachments: attachments.length > 0,\n  key:$('HTTP Request1').first().json.Key,\n  id:$('HTTP Request1').first().json.Id\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        16
+      ],
+      "id": "f8e340bc-a73e-47a5-ae98-f70057a2e228",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "output": "raw",
+        "filters": {
+          "custom": "from/emailAddress/address ne 'celestials070070@outlook.com'"
+        },
+        "options": {
+          "attachmentsPrefix": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 1,
+      "position": [
+        -576,
+        32
+      ],
+      "id": "bb2ba5a4-8d07-4cd7-9191-c7aa9c7e805b",
+      "name": "Microsoft Outlook Trigger",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "WX2Gc3SdlVrt0M4s",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ======================================================\n// 1️⃣ GET INPUT ITEMS\n// ======================================================\nconst items = $input.all();\nconsole.log(\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\")\n\n// ======================================================\n// 2️⃣ HTML → CLEAN TEXT FUNCTION\n// ======================================================\nfunction htmlToText(html) {\n  if (!html) return \"\";\n\n  return html\n    .replace(/<script[\\s\\S]*?>[\\s\\S]*?<\\/script>/gi, \"\")\n    .replace(/<style[\\s\\S]*?>[\\s\\S]*?<\\/style>/gi, \"\")\n    .replace(/<br\\s*\\/?>/gi, \"\\n\")\n    .replace(/<\\/p>/gi, \"\\n\")\n    .replace(/<[^>]+>/g, \"\")\n    .replace(/&nbsp;/g, \" \")\n    .replace(/&amp;/g, \"&\")\n    .replace(/&lt;/g, \"<\")\n    .replace(/&gt;/g, \">\")\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/\\n{3,}/g, \"\\n\\n\")\n    .trim();\n}\n\n// ======================================================\n// 3️⃣ PROCESS ITEMS (TEXT + BINARY)\n// ======================================================\nconst results = [];\n\nfor (const item of items) {\n  const json = item.json || {};\n  const binary = item.binary || {};\n\n  const cleanText = htmlToText(json.html);\n\n  results.push({\n    json: {\n      // IDs\n      id: json.id || null,\n      thread_id: json.threadId || null,\n      message_id: json.messageId || null,\n\n      // Meta\n      subject: json.subject || null,\n      date: json.date || null,\n      size: json.sizeEstimate || null,\n\n      // Sender / Receiver\n      from_email: json.from?.value?.[0]?.address || null,\n      from_name: json.from?.value?.[0]?.name || null,\n      to_email: json.to?.value?.[0]?.address || null,\n      to_name: json.to?.value?.[0]?.name || null,\n\n      // Labels\n      labels: json.labelIds || [],\n\n      // 📩 Cleaned message content\n      message_text: cleanText,\n\n      // 📎 Attachment flag\n      has_attachments: Object.keys(binary).length > 0,\n      email_processor:\"emailA\"\n    },\n\n    // ✅ THIS IS THE IMPORTANT PART\n    binary\n  });\n}\n\n// ======================================================\n// 4️⃣ RETURN TEXT + FILES\n// ======================================================\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        -448
+      ],
+      "id": "507ece68-c2fb-4032-b124-832bccb953e9",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ======================================================\n// 1️⃣ GET INPUT ITEMS\n// ======================================================\nconst items = $input.all();\nconsole.log(\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\")\n\n// ======================================================\n// 2️⃣ HTML → CLEAN TEXT FUNCTION\n// ======================================================\nfunction htmlToText(html) {\n  if (!html) return \"\";\n\n  return html\n    .replace(/<script[\\s\\S]*?>[\\s\\S]*?<\\/script>/gi, \"\")\n    .replace(/<style[\\s\\S]*?>[\\s\\S]*?<\\/style>/gi, \"\")\n    .replace(/<br\\s*\\/?>/gi, \"\\n\")\n    .replace(/<\\/p>/gi, \"\\n\")\n    .replace(/<[^>]+>/g, \"\")\n    .replace(/&nbsp;/g, \" \")\n    .replace(/&amp;/g, \"&\")\n    .replace(/&lt;/g, \"<\")\n    .replace(/&gt;/g, \">\")\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/\\n{3,}/g, \"\\n\\n\")\n    .trim();\n}\n\n// ======================================================\n// 3️⃣ PROCESS ITEMS (TEXT + BINARY)\n// ======================================================\nconst results = [];\n\nfor (const item of items) {\n  const json = item.json || {};\n  const binary = item.binary || {};\n\n  const cleanText = htmlToText(json.html);\n\n  results.push({\n    json: {\n      // IDs\n      id: json.id || null,\n      thread_id: json.threadId || null,\n      message_id: json.messageId || null,\n\n      // Meta\n      subject: json.subject || null,\n      date: json.date || null,\n      size: json.sizeEstimate || null,\n\n      // Sender / Receiver\n      from_email: json.from?.value?.[0]?.address || null,\n      from_name: json.from?.value?.[0]?.name || null,\n      to_email: json.to?.value?.[0]?.address || null,\n      to_name: json.to?.value?.[0]?.name || null,\n\n      // Labels\n      labels: json.labelIds || [],\n\n      // 📩 Cleaned message content\n      message_text: cleanText,\n\n      // 📎 Attachment flag\n      has_attachments: Object.keys(binary).length > 0,\n      email_processor:\"emailB\"\n    },\n\n    // ✅ THIS IS THE IMPORTANT PART\n    binary\n  });\n}\n\n// ======================================================\n// 4️⃣ RETURN TEXT + FILES\n// ======================================================\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        -304
+      ],
+      "id": "775b733d-4d81-498e-8f81-8501bfdd9c7e",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ======================================================\n// 1️⃣ GET INPUT ITEMS\n// ======================================================\nconst items = $input.all();\nconsole.log(\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\")\n\n// ======================================================\n// 2️⃣ HTML → CLEAN TEXT FUNCTION\n// ======================================================\nfunction htmlToText(html) {\n  if (!html) return \"\";\n\n  return html\n    .replace(/<script[\\s\\S]*?>[\\s\\S]*?<\\/script>/gi, \"\")\n    .replace(/<style[\\s\\S]*?>[\\s\\S]*?<\\/style>/gi, \"\")\n    .replace(/<br\\s*\\/?>/gi, \"\\n\")\n    .replace(/<\\/p>/gi, \"\\n\")\n    .replace(/<[^>]+>/g, \"\")\n    .replace(/&nbsp;/g, \" \")\n    .replace(/&amp;/g, \"&\")\n    .replace(/&lt;/g, \"<\")\n    .replace(/&gt;/g, \">\")\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/\\n{3,}/g, \"\\n\\n\")\n    .trim();\n}\n\n// ======================================================\n// 3️⃣ PROCESS ITEMS (TEXT + BINARY)\n// ======================================================\nconst results = [];\n\nfor (const item of items) {\n  const json = item.json || {};\n  const binary = item.binary || {};\n\n  const cleanText = htmlToText(json.html);\n\n  results.push({\n    json: {\n      // IDs\n      id: json.id || null,\n      thread_id: json.threadId || null,\n      message_id: json.messageId || null,\n\n      // Meta\n      subject: json.subject || null,\n      date: json.date || null,\n      size: json.sizeEstimate || null,\n\n      // Sender / Receiver\n      from_email: json.from?.value?.[0]?.address || null,\n      from_name: json.from?.value?.[0]?.name || null,\n      to_email: json.to?.value?.[0]?.address || null,\n      to_name: json.to?.value?.[0]?.name || null,\n\n      // Labels\n      labels: json.labelIds || [],\n\n      // 📩 Cleaned message content\n      message_text: cleanText,\n\n      // 📎 Attachment flag\n      has_attachments: Object.keys(binary).length > 0,\n      email_processor:\"emailC\"\n    },\n\n    // ✅ THIS IS THE IMPORTANT PART\n    binary\n  });\n}\n\n// ======================================================\n// 4️⃣ RETURN TEXT + FILES\n// ======================================================\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        -144
+      ],
+      "id": "3897c53e-f5ae-4870-9d70-0a44b2c2f464",
+      "name": "Code in JavaScript4"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Code in JavaScript1').item.json.email_processor }}",
+                    "rightValue": "emailA",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "f66000f6-526a-4455-a371-a78a0c0c53da"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "emailA"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "212193ad-6b8d-4618-9127-367b00307b51",
+                    "leftValue": "={{ $('Code in JavaScript1').item.json.email_processor }}",
+                    "rightValue": "emailB",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "emailB"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "69955ed2-373e-4c01-bdc7-7b363626580e",
+                    "leftValue": "={{ $('Code in JavaScript1').item.json.email_processor }}",
+                    "rightValue": "emailC",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "emailC"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e5acf99f-b350-4f96-bea6-f87f57e1a5e5",
+                    "leftValue": "={{ $('Code in JavaScript1').item.json.email_processor }}",
+                    "rightValue": "outlook",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "outlook"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2192,
+        -224
+      ],
+      "id": "9d12cd37-68a9-4ef4-a885-700918e6c2c8",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ $('Code in JavaScript1').item.json.id }}",
+        "message": "={{ $json.html_message }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2880,
+        -160
+      ],
+      "id": "4a7533f9-8cae-4635-ab9d-3ee902e26b53",
+      "name": "Reply to a message2",
+      "webhookId": "1741cadc-c762-4c27-86eb-43f4f374001e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "JS9USX9PiQUaF2Ex",
+          "name": "Gmail account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ======================================================\n// 1️⃣ GET INPUT ITEMS\n// ======================================================\nconst items = $input.all();\nconsole.log(\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\")\n// ======================================================\n// 2️⃣ HTML → CLEAN TEXT FUNCTION\n// ======================================================\nfunction htmlToText(html) {\n  if (!html) return \"\";\n\n  return html\n    .replace(/<script[\\s\\S]*?>[\\s\\S]*?<\\/script>/gi, \"\")\n    .replace(/<style[\\s\\S]*?>[\\s\\S]*?<\\/style>/gi, \"\")\n    .replace(/<br\\s*\\/?>/gi, \"\\n\")\n    .replace(/<\\/p>/gi, \"\\n\")\n    .replace(/<[^>]+>/g, \"\")\n    .replace(/&nbsp;/g, \" \")\n    .replace(/&amp;/g, \"&\")\n    .replace(/&lt;/g, \"<\")\n    .replace(/&gt;/g, \">\")\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/\\n{3,}/g, \"\\n\\n\")\n    .trim();\n}\n\n// ======================================================\n// 3️⃣ PROCESS ITEMS (OUTLOOK FORMAT)\n// ======================================================\nconst results = [];\n\nfor (const item of items) {\n  const json = item.json || {};\n  const binary = item.binary || {};\n\n  // Outlook HTML body\n  const htmlContent = json.body?.content || \"\";\n  const cleanText = htmlToText(htmlContent);\n\n  results.push({\n    json: {\n      // IDs\n      id: json.id || null,\n      thread_id: json.conversationId || null,\n      message_id: json.internetMessageId || null,\n\n      // Meta\n      subject: json.subject || null,\n      date: json.receivedDateTime || json.sentDateTime || null,\n      size: json.size || null,\n\n      // Sender\n      from_email: json.from?.emailAddress?.address || null,\n      from_name: json.from?.emailAddress?.name || null,\n\n      // Receiver (first TO only)\n      to_email: json.toRecipients?.[0]?.emailAddress?.address || null,\n      to_name: json.toRecipients?.[0]?.emailAddress?.name || null,\n\n      // Outlook metadata\n      categories: json.categories || [],\n      importance: json.importance || \"normal\",\n      is_read: json.isRead ?? null,\n\n      // 📩 Cleaned message content\n      message_text: cleanText || json.bodyPreview || \"\",\n\n      // 📎 Attachment flag\n      has_attachments: json.hasAttachments || Object.keys(binary).length > 0,\n\n      // Processor marker\n      email_processor: \"outlook\"\n    },\n\n    // ✅ Keep binary if attachments exist\n    binary\n  });\n}\n\n// ======================================================\n// 4️⃣ RETURN TEXT + FILES\n// ======================================================\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        32
+      ],
+      "id": "a355afbb-2f3a-45e0-ad1f-e8f1f9014b21",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "contacts",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "email",
+              "keyValue": "={{ $('Code in JavaScript1').item.json.to_email }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2208,
+        256
+      ],
+      "id": "fcc6ceca-69e4-4f9c-8d56-1449ad04ed1d",
+      "name": "Get a contact",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "MCOHsHauCJQio9nx",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4",
+          "mode": "list",
+          "cachedResultName": "GPT-4"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=You are a data structuring assistant for a Retrieval-Augmented Generation (RAG) system.\n\nYou are given the following email conversation:\n\nreceieved:\n{{ $json.message_text }}\nsent reply:\n{{ $json.ai_output }}\n\nYour task:\n1. Identify distinct semantic cases (topics, requests, or issues) in this conversation.\n2. For EACH case:\n   - Generate a concise, descriptive title (5–8 words)\n   - Write a detailed description (factual, self-contained)\n   - Determine the input type automatically based on the content (e.g., \"email\", \"chat\", \"document\")\n   - Set a status for the case (e.g., \"new\", \"in progress\", \"closed\"); default is \"new\" if unclear\n3. Each case should summarize the issue or client intent.\n4. Do NOT include personal emails in the title.\n5. Output STRICTLY valid JSON in this format:\n{\n  \"cases\": [\n    {\n      \"case_title\": \"Short descriptive title\",\n      \"case_description\": \"Detailed factual explanation\",\n      \"input_type\": \"email or chat or document\",\n      \"status\": \"new or in progress or closed\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        2832,
+        240
+      ],
+      "id": "73f54f38-20da-4d70-b7d9-ca68ff9f9cc7",
+      "name": "Message a model2",
+      "credentials": {
+        "openAiApi": {
+          "id": "DYI6nHiTMq1tDsDv",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ======================================================\n// COLLECT & MERGE IMPORTANT DATA FROM MULTIPLE NODES\n// ======================================================\n\n// 🔹 External node data\nconst email = $('Code in JavaScript1').item.json;\nconst contact = $input.first().json; // current input\nconst ai_output = $('Question & Answer').item.json.output || null;\n\n// ======================================================\n// BUILD FINAL OBJECT\n// ======================================================\n\nreturn [\n  {\n    json: {\n      // 🔑 Contact info\n      contact_id: contact.id,\n      client_id: contact.client_id,\n      contact_name: contact.name,\n      contact_email: contact.email,\n      contact_role: contact.role,\n      contact_created_at: contact.created_at,\n\n      // 📧 Email metadata\n      email_id: email.id,\n      thread_id: email.thread_id,\n      message_id: email.message_id,\n      subject: email.subject,\n\n      from_email: email.from_email,\n      from_name: email.from_name,\n      to_email: email.to_email,\n      to_name: email.to_name,\n\n      email_processor: email.email_processor,\n\n      // 📝 Email content\n      message_text: email.message_text,\n      image_details: email.image_details,\n\n      // 🤖 AI response\n      ai_output,\n      document_text:$('Code in JavaScript1').first().json.attachment_text_details || $('Code in JavaScript1').first().json.attachment_text_details,\n\n      attachment:{\n      metadata:$('Code in JavaScript1').item.json.attachments || $('Code in JavaScript5').item.json.attachment.metadata\n    }\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        240
+      ],
+      "id": "6dd561aa-8752-4ee8-b4c9-2c21854e3871",
+      "name": "Code in JavaScript7"
+    },
+    {
+      "parameters": {
+        "tableId": "cases",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "client_id",
+              "fieldValue": "={{ $('Code in JavaScript7').item.json.client_id }}"
+            },
+            {
+              "fieldId": "case_summary",
+              "fieldValue": "={{ $('Loop Over Items').item.json.case_description }}"
+            },
+            {
+              "fieldId": "content",
+              "fieldValue": "={{ $('Loop Over Items').item.json.embedding_text }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "={{ $('Loop Over Items').item.json.status }}"
+            },
+            {
+              "fieldId": "msg_id",
+              "fieldValue": "={{ $('Loop Over Items').item.json.msg_id }}"
+            },
+            {
+              "fieldId": "issue_type",
+              "fieldValue": "={{ $('Loop Over Items').item.json.input_type }}"
+            },
+            {
+              "fieldId": "embedding",
+              "fieldValue": "={{ $json.data[0].embedding }}"
+            },
+            {
+              "fieldId": "case_title",
+              "fieldValue": "={{ $('Code in JavaScript9').item.json.case_title }}"
+            },
+            {
+              "fieldId": "metadata",
+              "fieldValue": "={{ $json.usage }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3824,
+        256
+      ],
+      "id": "e10e3df9-1b93-415c-8e16-33ad250a99b2",
+      "name": "Create cases1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "MCOHsHauCJQio9nx",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get AI output\nconst aiOutput = $input.all()[0].json.output;\n\n// Extract the text field from the AI response\nconst text = aiOutput[0]?.content[0]?.text || '{}';\n\nlet cases = [];\ntry {\n    // Parse the string into JSON\n    const parsed = JSON.parse(text);\n    cases = parsed.cases || [];\n} catch (err) {\n    console.error(\"Failed to parse AI output:\", err, text);\n}\n\nreturn cases.map(c => ({\n  json: {\n    case_title: c.case_title,\n    case_description: c.case_description,\n    input_type: c.input_type,\n    status: c.status,\n    embedding_text: c.case_description,  // field to feed into Embeddings node\n    msg_id: $input.first().json.output[0].id\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3152,
+        240
+      ],
+      "id": "dbc07386-4bb6-4b95-b69c-e78839637084",
+      "name": "Code in JavaScript9"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ======================================================\n// SPLIT INTO TWO OBJECTS + ADD case_id TO BOTH\n// ======================================================\n\n// Case record from input (case_id lives here)\nconst caseRecord = $input.first().json;\nconst case_id = caseRecord.id;\n\n// Source data (email + AI content)\nconst source = $('Code in JavaScript7').item.json;\n\n// Base object shared by both\nconst base = {\n  ...source,\n  case_id,                 // ✅ added to both\n  client_id: caseRecord.client_id,\n  case_status: caseRecord.status,\n  issue_type: caseRecord.issue_type,\n  msg_id: caseRecord.msg_id,\n  created_at: caseRecord.created_at\n};\n\n// -------------------------------\n// Object 1 → AI output\n// -------------------------------\nconst aiObject = {\n  ...base,\n  content: source.ai_output ?? null,\n  content_type: \"ai_output\"\n};\n\n// -------------------------------\n// Object 2 → Message text\n// -------------------------------\nconst messageObject = {\n  ...base,\n  content: source.message_text ?? null,\n  content_type: \"message_text\"\n};\n\n// Remove original fields to avoid duplication\ndelete aiObject.ai_output;\ndelete aiObject.message_text;\n\ndelete messageObject.ai_output;\ndelete messageObject.message_text;\n\n// Return TWO output items\nreturn [\n  { json: aiObject },\n  { json: messageObject }\n  \n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3616,
+        96
+      ],
+      "id": "aaafb17c-5fd5-41e6-9c2e-8da3a1dcb41a",
+      "name": "Code in JavaScript10"
+    },
+    {
+      "parameters": {
+        "tableId": "messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "case_id",
+              "fieldValue": "={{ $json.case_id }}"
+            },
+            {
+              "fieldId": "client_id",
+              "fieldValue": "={{ $json.client_id }}"
+            },
+            {
+              "fieldId": "contact_id",
+              "fieldValue": "={{ $json.contact_id }}"
+            },
+            {
+              "fieldId": "from_email",
+              "fieldValue": "={{ $json.from_email }}"
+            },
+            {
+              "fieldId": "to_email",
+              "fieldValue": "={{ $json.to_email }}"
+            },
+            {
+              "fieldId": "message_text",
+              "fieldValue": "={{ $json.content }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3792,
+        96
+      ],
+      "id": "2360dcce-312e-4602-9430-49354a10fded",
+      "name": "Create messages",
+      "credentials": {
+        "supabaseApi": {
+          "id": "MCOHsHauCJQio9nx",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"text-embedding-3-small\",\n  \"input\": \"//title: {{ $json.case_title }}// Description: {{ $json.embedding_text }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3632,
+        256
+      ],
+      "id": "65eda9aa-e9c9-4909-9484-150c8ba308e6",
+      "name": "HTTP Request",
+      "credentials": {
+        "openAiApi": {
+          "id": "DYI6nHiTMq1tDsDv",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ $('Code in JavaScript1').item.json.id }}",
+        "message": "={{ $json.html_message }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2880,
+        -320
+      ],
+      "id": "ad00c609-1ada-473e-ad32-093612ea44fe",
+      "name": "Reply to a message1",
+      "webhookId": "1741cadc-c762-4c27-86eb-43f4f374001e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "ortZFia9m4Q1vQmB",
+          "name": "Gmail account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "attachments",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "message_id",
+              "fieldValue": "={{ $json.msg_id }}"
+            },
+            {
+              "fieldId": "file_path",
+              "fieldValue": "={{ $json.attachments[0].id }}"
+            },
+            {
+              "fieldId": "file_type",
+              "fieldValue": "={{ $json.attachments[0].mimeType }}"
+            },
+            {
+              "fieldId": "file_size",
+              "fieldValue": "={{ $json.attachments[0].fileSize }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4432,
+        80
+      ],
+      "id": "1aa360c5-1c58-44e6-ba1a-eb367979bf87",
+      "name": "Create attachments",
+      "credentials": {
+        "supabaseApi": {
+          "id": "MCOHsHauCJQio9nx",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "29ed7d47-3c84-4b6e-b18b-27d0d6208786",
+              "leftValue": "={{ $('Code in JavaScript10').item.json.attachment.metadata }}",
+              "rightValue": "",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4000,
+        96
+      ],
+      "id": "d98bf7d9-4ef6-408c-b9e2-e876c5dcd561",
+      "name": "If4"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "={{ $json.document_labels }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        1536,
+        -880
+      ],
+      "id": "5143c600-2dd4-4720-bd42-a586d53d78fe",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$binary[$json.document_labels].fileExtension}}",
+                    "rightValue": "pdf",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb6df1a6-949b-4d07-8fe0-c0a5cd2ea87c"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "pdf"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "263cd6c1-7877-4b55-b0fd-782cbee72b10",
+                    "leftValue": "={{$binary[$json.document_labels].fileExtension}}",
+                    "rightValue": "csv",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "csv"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "84eb2a90-ea6e-4943-a848-0b42fe60c2a3",
+                    "leftValue": "={{$binary[$json.document_labels].fileExtension}}",
+                    "rightValue": "ods",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ods"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "2ab86686-97be-489e-a026-a053af54b319",
+                    "leftValue": "={{$binary[$json.document_labels].fileExtension}}",
+                    "rightValue": "txt",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "txt"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "5c835eff-9d64-4467-b70a-d36358a37cd6",
+                    "leftValue": "={{$binary[$json.document_labels].fileExtension}}",
+                    "rightValue": "png",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "png"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "48d30a64-fda6-4380-8ee2-c1f6b0fd8f75",
+                    "leftValue": "={{$binary[$json.document_labels].fileExtension}}",
+                    "rightValue": "jpeg",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "jpeg"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "fdf45b8d-c6a1-4fd0-be22-88fa514898f4",
+                    "leftValue": "={{$binary[$json.document_labels].fileExtension}}",
+                    "rightValue": "jpg",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "jpg"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1312,
+        -544
+      ],
+      "id": "81e0d747-6649-409e-9cf5-b0dcd3350f90",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "={{ $json.document_labels }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        1536,
+        -720
+      ],
+      "id": "21dc0b1f-b054-41a9-a079-3cdb095f3990",
+      "name": "Extract from File1"
+    },
+    {
+      "parameters": {
+        "operation": "binaryToPropery",
+        "binaryPropertyName": "={{ $json.document_labels }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        1536,
+        -560
+      ],
+      "id": "83efe003-94a0-454e-903e-1e540d056dac",
+      "name": "Extract from File2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nlet mergedText = '';\n\nfor (const item of items) {\n\n  let text = '';\n\n  // Case 1: Standard structure (json.output)\n  if (item.json?.output?.[0]?.content?.[0]?.text) {\n    text = item.json.output[0].content[0].text;\n  }\n\n  // Case 2: Direct array structure (json[0])\n  else if (Array.isArray(item.json) && item.json[0]?.content?.[0]?.text) {\n    text = item.json[0].content[0].text;\n  }\n\n  if (text) {\n    mergedText += text.trim() + '\\n\\n';\n  }\n}\n\nreturn [\n  {\n    json: {\n      merged_text: mergedText.trim()\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        -256
+      ],
+      "id": "a142ce25-c80b-48c7-a776-2ec4ac45bdae",
+      "name": "Code in JavaScript6"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4",
+          "mode": "list",
+          "cachedResultName": "GPT-4"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=from the text given below, analyze it carefully,get all important data from it and summarize it\n{{ $json.plain_text }}\n\n"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        1984,
+        -656
+      ],
+      "id": "be9ce63b-cd46-41a9-a6e3-9b1425eed6ac",
+      "name": "Message a model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "DYI6nHiTMq1tDsDv",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Safely read values from nodes\n//const attachment_id = $input.first()?.json?.id ?? null;\nconst msg_id = $('Create messages').first()?.json?.id ?? null;\nconst document_text = $('Code in JavaScript10').first()?.json?.document_text ?? null;\nconst case_id = $('Create cases1').first()?.json?.id ?? null;\nconst summary = $('Code in JavaScript10').first()?.json?.content ?? null;\n\n// Return ONE item (n8n requires array)\nreturn [\n  {\n    json: {\n      msg_id,\n      case_id,\n      document_text,\n      summary,\n      attachments:$('Code in JavaScript10').first().json.attachment.metadata\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4224,
+        80
+      ],
+      "id": "8e842c50-54ae-48d8-b2fa-104fd82eb9aa",
+      "name": "Code in JavaScript8"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"text-embedding-3-small\",\n  \"input\": {{ JSON.stringify($('Code in JavaScript8').item.json.document_text) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        4640,
+        80
+      ],
+      "id": "cd854ce2-0316-4875-b117-0b988e2e7791",
+      "name": "HTTP Request2",
+      "credentials": {
+        "openAiApi": {
+          "id": "DYI6nHiTMq1tDsDv",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "documents",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "case_id",
+              "fieldValue": "={{ $('Code in JavaScript8').item.json.case_id }}"
+            },
+            {
+              "fieldId": "embedding",
+              "fieldValue": "={{ $json.data[0].embedding }}"
+            },
+            {
+              "fieldId": "message_id",
+              "fieldValue": "={{ $('Code in JavaScript8').item.json.msg_id }}"
+            },
+            {
+              "fieldId": "attachment_id",
+              "fieldValue": "={{ $('Create attachments').item.json.id }}"
+            },
+            {
+              "fieldId": "summary",
+              "fieldValue": "={{ $('Code in JavaScript8').item.json.summary }}"
+            },
+            {
+              "fieldId": "content",
+              "fieldValue": "={{ $('Code in JavaScript8').item.json.document_text }}"
+            },
+            {
+              "fieldId": "metadata",
+              "fieldValue": "={{ $json.usage }}"
+            },
+            {
+              "fieldId": "content_type",
+              "fieldValue": "={{ $('Code in JavaScript8').item.json.attachments[0].mimeType }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4848,
+        80
+      ],
+      "id": "c9b4783c-97a2-4823-9083-9c42ce30d1bc",
+      "name": "Create document",
+      "credentials": {
+        "supabaseApi": {
+          "id": "MCOHsHauCJQio9nx",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://pcrkohiqkhsjmbauedbl.supabase.co/storage/v1/object/n8n/{{ $binary.attachment_0.fileName}}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "={{ $binary.attachment_0.mimeType }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "attachment_0",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        208,
+        -464
+      ],
+      "id": "6c0de873-ab6f-4a4b-900e-6975bfa4b928",
+      "name": "HTTP Request1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "MCOHsHauCJQio9nx",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "934fa2d7-5eb7-42c1-9d5d-541fd2429232",
+              "leftValue": "={{ $('HTTP Request1').item.json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "notExists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        592,
+        -464
+      ],
+      "id": "8d16d93c-b4b5-48cd-b31b-88f2896c3a28",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "750c0667-54e2-41d7-a49d-c65dedd2d295",
+              "leftValue": "={{ $binary}}",
+              "rightValue": "jpg",
+              "operator": {
+                "type": "object",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -32,
+        -448
+      ],
+      "id": "eb96b148-b26a-4644-9235-d3b9c55df7ca",
+      "name": "If5"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $('If5').all();\n\nreturn items.map(item => ({\n  json: item.json,\n  binary: item.binary\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -464
+      ],
+      "id": "b84fdb8b-f6c9-4ab9-8f64-a3f81cdec436",
+      "name": "Code in JavaScript12"
+    },
+    {
+      "parameters": {
+        "tableId": "contacts",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "name",
+              "fieldValue": "={{ $('Code in JavaScript1').item.json.from_name ||  $('Code in JavaScript5').item.json.from_name }}"
+            },
+            {
+              "fieldId": "email",
+              "fieldValue": "={{$('Code in JavaScript1').item.json.from_email || $('Code in JavaScript5').item.json.from_email }}"
+            },
+            {
+              "fieldId": "role",
+              "fieldValue": "user"
+            },
+            {
+              "fieldId": "client_id",
+              "fieldValue": "2"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2464,
+        528
+      ],
+      "id": "6a59be96-f192-4f91-aa1d-8c0457ed7060",
+      "name": "Create a contact",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "MCOHsHauCJQio9nx",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "13fc5b41-1c04-4fcc-b2a7-e14c81674040",
+              "leftValue": "={{ $json }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2432,
+        256
+      ],
+      "id": "4662baf1-8767-4876-8bcf-54ba7fc4f9c9",
+      "name": "If3"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        3360,
+        240
+      ],
+      "id": "bda768e5-5bbd-4a6f-84bc-ff0c839051b0",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "celestialtechd@gmail.com",
+        "subject": "Approval required",
+        "message": "=Name:{{ $('Code in JavaScript1').item.json.from_name }}\nEmail:{{ $('Code in JavaScript1').item.json.from_email }}\n{{ $('Code in JavaScript1').item.json.message_text }}",
+        "responseType": "customForm",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Message",
+              "fieldType": "textarea",
+              "defaultValue": "={{ $json.output }}"
+            },
+            {
+              "fieldLabel": "Document",
+              "fieldType": "file"
+            },
+            {
+              "fieldLabel": "Approved",
+              "fieldType": "checkbox",
+              "defaultValue": "true",
+              "fieldOptions": {
+                "values": [
+                  {}
+                ]
+              },
+              "limitSelection": "exact",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1728,
+        16
+      ],
+      "id": "1c9ddf9e-f685-4236-934f-9b19330b06fb",
+      "name": "Send message and wait for response",
+      "webhookId": "df0fa951-a8ca-4da8-b014-68971d5d60ee",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "rFfGY0Xv3R87IMIX",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  \n  // Get document array safely\n  const documents = item.json.data?.Document || [];\n  const fileCount = Array.isArray(documents) ? documents.length : 0;\n\n  let fileNamesString = null;\n\n  if (fileCount === 1) {\n    fileNamesString = 'Document';\n  } \n  else if (fileCount > 1) {\n    fileNamesString = documents\n      .map((_, index) => `Document_${index}`)\n      .join(',');\n  }\n\n  // Get message text safely\n  const message = item.json.data?.Message || '';\n\n  // Convert text to HTML (handle \\r\\n and \\n)\n  const formattedMessage = message\n    .replace(/\\r\\n/g, '\\n')\n    .replace(/\\n/g, '<br>');\n\n  // Final HTML with signature appended\n  const htmlMessage = `\n    ${formattedMessage}\n    <br><br>\n    Regards,<br>\n    Jack<br>\n    <br>\n    <span style=\"color:green;\">\n      <b>MarbleBee</b> <br>One-Step Destination for Custom Marble Products - from Sculptures to Slabs\n    </span><br>\n    <a href=\"https://MarbleBee.com\" target=\"_blank\" style=\"color:green; text-decoration:none;\">\n  MarbleBee.com\n</a>\n  `;\n\n  return {\n    json: {\n      ...item.json,\n      document_count: fileCount,\n      document_labels: fileNamesString,\n      html_message: htmlMessage\n    },\n    binary: item.binary\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        -448
+      ],
+      "id": "105bf546-e51e-4403-9a26-c80d12b2b643",
+      "name": "Code in JavaScript11"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0f479b7e-2ede-4585-85bd-47801bd4366f",
+              "leftValue": "={{ $json.document_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "lte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2640,
+        -448
+      ],
+      "id": "c6322321-4f82-4abf-ab6b-85e8b2c290cd",
+      "name": "If12"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  \n  // Get document array safely\n  const documents = item.json.data?.Document || [];\n  const fileCount = Array.isArray(documents) ? documents.length : 0;\n\n  let fileNamesString = null;\n\n  if (fileCount === 1) {\n    fileNamesString = 'Document';\n  } \n  else if (fileCount > 1) {\n    fileNamesString = documents\n      .map((_, index) => `Document_${index}`)\n      .join(',');\n  }\n\n  // Get message text safely\n  const message = item.json.data?.Message || '';\n\n  // Convert text to HTML (handle \\r\\n and \\n)\n  const formattedMessage = message\n    .replace(/\\r\\n/g, '\\n')\n    .replace(/\\n/g, '<br>');\n\n  // Final HTML with signature appended\n  const htmlMessage = `\n    ${formattedMessage}\n    <br><br>\n    Regards,<br>\n    Jack<br>\n    <br>\n    <span style=\"color:green;\">\n      <b>MarbleBee</b> <br>One-Step Destination for Custom Marble Products - from Sculptures to Slabs\n    </span><br>\n    <a href=\"https://MarbleBee.com\" target=\"_blank\" style=\"color:green; text-decoration:none;\">\n  MarbleBee.com\n</a>\n  `;\n\n  return {\n    json: {\n      ...item.json,\n      document_count: fileCount,\n      document_labels: fileNamesString,\n      html_message: htmlMessage\n    },\n    binary: item.binary\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        -144
+      ],
+      "id": "e2956f8e-b3cc-41ae-9a83-767a83e2e46f",
+      "name": "Code in JavaScript13"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  \n  // Get document array safely\n  const documents = item.json.data?.Document || [];\n  const fileCount = Array.isArray(documents) ? documents.length : 0;\n\n  let fileNamesString = null;\n\n  if (fileCount === 1) {\n    fileNamesString = 'Document';\n  } \n  else if (fileCount > 1) {\n    fileNamesString = documents\n      .map((_, index) => `Document_${index}`)\n      .join(',');\n  }\n\n  // Get message text safely\n  const message = item.json.data?.Message || '';\n\n  // Convert text to HTML (handle \\r\\n and \\n)\n  const formattedMessage = message\n    .replace(/\\r\\n/g, '\\n')\n    .replace(/\\n/g, '<br>');\n\n  // Final HTML with signature appended\n  const htmlMessage = `\n    ${formattedMessage}\n    <br><br>\n    Regards,<br>\n    Jack<br>\n    <br>\n    <span style=\"color:green;\">\n      <b>MarbleBee</b> <br>One-Step Destination for Custom Marble Products - from Sculptures to Slabs\n    </span><br>\n    <a href=\"https://MarbleBee.com\" target=\"_blank\" style=\"color:green; text-decoration:none;\">\n  MarbleBee.com\n</a>\n  `;\n\n  return {\n    json: {\n      ...item.json,\n      document_count: fileCount,\n      document_labels: fileNamesString,\n      html_message: htmlMessage\n    },\n    binary: item.binary\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        -304
+      ],
+      "id": "60e514e1-892e-47f4-8f1c-c246e86b23c8",
+      "name": "Code in JavaScript14"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  \n  // Get document array safely\n  const documents = item.json.data?.Document || [];\n  const fileCount = Array.isArray(documents) ? documents.length : 0;\n\n  let fileNamesString = null;\n\n  if (fileCount === 1) {\n    fileNamesString = 'Document';\n  } \n  else if (fileCount > 1) {\n    fileNamesString = documents\n      .map((_, index) => `Document_${index}`)\n      .join(',');\n  }\n\n  // Get message text safely\n  const message = item.json.data?.Message || '';\n\n  // Convert text to HTML (handle \\r\\n and \\n)\n  const formattedMessage = message\n    .replace(/\\r\\n/g, '\\n')\n    .replace(/\\n/g, '<br>');\n\n  // Final HTML with signature appended\n  const htmlMessage = `\n    ${formattedMessage}\n    <br><br>\n    Regards,<br>\n    Jack<br>\n    <br>\n    <span style=\"color:green;\">\n      <b>MarbleBee</b> <br>One-Step Destination for Custom Marble Products - from Sculptures to Slabs\n    </span><br>\n    <a href=\"https://MarbleBee.com\" target=\"_blank\" style=\"color:green; text-decoration:none;\">\n  MarbleBee.com\n</a>\n  `;\n\n  return {\n    json: {\n      ...item.json,\n      document_count: fileCount,\n      document_labels: fileNamesString,\n      html_message: htmlMessage\n    },\n    binary: item.binary\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        16
+      ],
+      "id": "be8d8a45-20f6-4230-a9ed-3f9a96e783e9",
+      "name": "Code in JavaScript15"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0f479b7e-2ede-4585-85bd-47801bd4366f",
+              "leftValue": "={{ $json.document_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "lte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2656,
+        -304
+      ],
+      "id": "fc01f95b-011a-4cbf-ac91-3558ad3acbc3",
+      "name": "If13"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0f479b7e-2ede-4585-85bd-47801bd4366f",
+              "leftValue": "={{ $json.document_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "lte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2656,
+        -144
+      ],
+      "id": "faf66d73-4dc3-4eee-a964-c89359dc4ce8",
+      "name": "If14"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0f479b7e-2ede-4585-85bd-47801bd4366f",
+              "leftValue": "={{ $json.document_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "lte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2656,
+        16
+      ],
+      "id": "b0c21b6b-7dbc-4355-98f9-e85331adc036",
+      "name": "If15"
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ $('Code in JavaScript1').item.json.id }}",
+        "message": "={{ $json.html_message }}",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "={{ $json.document_labels }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3072,
+        -432
+      ],
+      "id": "555cef37-bd05-4b53-a4ec-a9b984f31d7a",
+      "name": "Reply to a message4",
+      "webhookId": "1741cadc-c762-4c27-86eb-43f4f374001e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "rFfGY0Xv3R87IMIX",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ $('Code in JavaScript1').item.json.id }}",
+        "message": "={{ $json.html_message }}",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "{{ $json.document_labels }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3216,
+        -288
+      ],
+      "id": "4cbf4e40-5500-4f77-b383-a7171501aab5",
+      "name": "Reply to a message5",
+      "webhookId": "1741cadc-c762-4c27-86eb-43f4f374001e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "ortZFia9m4Q1vQmB",
+          "name": "Gmail account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ $('Code in JavaScript1').item.json.id }}",
+        "message": "={{ $json.html_message }}",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "{{ $json.document_labels }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3072,
+        -128
+      ],
+      "id": "7c980046-3eac-4cdd-9da2-223139db35d3",
+      "name": "Reply to a message6",
+      "webhookId": "1741cadc-c762-4c27-86eb-43f4f374001e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "JS9USX9PiQUaF2Ex",
+          "name": "Gmail account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Code in JavaScript1').item.json.id }}",
+          "mode": "id"
+        },
+        "replyToSenderOnly": true,
+        "message": "={{ $json.html_message }}",
+        "additionalFields": {
+          "attachments": {
+            "attachments": [
+              {
+                "binaryPropertyName": "={{ $json.document_labels }}"
+              }
+            ]
+          },
+          "bodyContentType": "html"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        3200,
+        32
+      ],
+      "id": "954e6677-3d45-4e3e-93b6-7885a8bf8158",
+      "name": "Reply to a message7",
+      "webhookId": "af5e3bdd-3fcd-4120-ae12-3eaad66faa4a",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "WX2Gc3SdlVrt0M4s",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all input items\nconst items = $input.all();\nconst results = [];\n\n// Simple function to strip HTML tags\nfunction stripHtml(html) {\n  if (!html) return '';\n  return html.replace(/<\\/?[^>]+(>|$)/g, ''); // remove all HTML tags\n}\n\nfor (const item of items) {\n  const text = item.json?.text || '';\n  const plainText = stripHtml(text).replace(/\\s+/g, ' ').trim(); // optional: normalize spaces\n\n  results.push({\n    json: {\n      plain_text: plainText\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -656
+      ],
+      "id": "69886dd2-7712-4d4e-b078-2f959a000ecd",
+      "name": "Code in JavaScript16"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst newItems = [];\n\nfor (const item of items) {\n\n  const binaryKeys = item.binary ? Object.keys(item.binary) : [];\n  const attachmentKeys = binaryKeys.filter(key => key.startsWith('attachment_'));\n\n  // If no attachments → optionally return original item (or skip)\n  if (attachmentKeys.length === 0) {\n    newItems.push({\n      json: {\n        ...item.json,\n        document_labels: null\n      },\n      binary: {}\n    });\n    continue;\n  }\n\n  // Create one output item per attachment\n  for (const key of attachmentKeys) {\n    newItems.push({\n      json: {\n        ...item.json,\n        document_labels: key\n      },\n      binary: {\n        [key]: item.binary[key]\n      }\n    });\n  }\n}\n\nreturn newItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        -480
+      ],
+      "id": "50de8b23-9989-4f62-8c5f-5a7a84d81dde",
+      "name": "Code in JavaScript17"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1056,
+        -480
+      ],
+      "id": "ddf4e99f-725e-4fe7-897c-16ab6e681f4f",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "binaryPropertyName": "={{ $json.document_labels }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        1536,
+        -400
+      ],
+      "id": "00f30cd9-ab67-4d8b-8ce2-f2fc43416fc3",
+      "name": "Extract from File3"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1200,
+        304
+      ],
+      "id": "58a6bad7-aa67-4edb-8f55-702f53c67d91",
+      "name": "OpenAI Chat Model2",
+      "credentials": {
+        "openAiApi": {
+          "id": "DYI6nHiTMq1tDsDv",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "stripNewLines": true
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1584,
+        560
+      ],
+      "id": "de8c38cc-1788-432d-9521-9f95c9b1d188",
+      "name": "Embeddings OpenAI3",
+      "credentials": {
+        "openAiApi": {
+          "id": "DYI6nHiTMq1tDsDv",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Message a model').item.json.output[0].id }}",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1424,
+        304
+      ],
+      "id": "f2fa1be1-a2b5-44e9-9627-bc1a3aa0937c",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a professional Sales Manager specializing in marble, stone, and related architectural products.\n\nA customer has sent the following message:\n\nMessage:\n{{ $json.message_text || $json.output[0].content[0].text }}\n\nImage Details (if any):\n{{ $json.image_details }}\n\nYour task:\n\nUnderstand and internally restructure the customer’s request into a clear and professional product requirement.\n\nRemove unnecessary casual wording from the customer’s original message.\n\nIdentify internally the key product details:\n\nProduct type\n\nMaterial (if mentioned)\n\nSize or dimensions (if mentioned)\n\nColor or finish (if mentioned)\n\nQuantity (if mentioned)\n\nCustomization requirements (if mentioned)\n\nIf any details are unclear, interpret them in the most reasonable way for marble or stone products.\n\nWrite a professional reply email with a proper opening:\n\nExample: “Dear [Customer Name], I hope this message finds you well.”\n\nThe email must end exactly with:\n\n“Thank you, and I look forward to your response.”\n\nDo NOT add anything after this line (no regards, signatures, or extra text).\n\nIMPORTANT:\n\nOutput ONLY the email body.\n\nDo NOT include product search queries or internal notes.\n\nKeep the tone professional, courteous, and concise.\n\nCustomer name: {{ $('Code in JavaScript1').item.json.from_name }}\nYour name: {{ $('Code in JavaScript1').item.json.to_name }}\n",
+        "options": {}
+      },
+      "id": "caf09107-3c5e-40ef-a580-3785ea5ef1f8",
+      "name": "Question & Answer",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1328,
+        16
+      ],
+      "typeVersion": 1.8
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "={{ $('Message a model').item.json.output[0].content[0].text }}",
+        "tableName": {
+          "__rl": true,
+          "value": "cases",
+          "mode": "list",
+          "cachedResultName": "cases"
+        },
+        "topK": 1,
+        "includeDocumentMetadata": false,
+        "useReranker": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        1584,
+        304
+      ],
+      "id": "6eeb1d9d-80d1-4b6c-b0e2-495b2dcc10dd",
+      "name": "Supabase Vector Store1",
+      "notesInFlow": false,
+      "credentials": {
+        "supabaseApi": {
+          "id": "MCOHsHauCJQio9nx",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Code in JavaScript1').item.json.id }}",
+          "mode": "id"
+        },
+        "replyToSenderOnly": true,
+        "message": "={{ $json.html_message }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        0
+      ],
+      "id": "f9e9a4b0-a4cd-4420-a4ea-34d2526bbb9e",
+      "name": "Reply to a message3",
+      "webhookId": "af5e3bdd-3fcd-4120-ae12-3eaad66faa4a",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "WX2Gc3SdlVrt0M4s",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ $('Code in JavaScript1').item.json.id }}",
+        "message": "={{ $json.html_message }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2880,
+        -464
+      ],
+      "id": "b4fc316f-d6f0-45bb-aaf9-ac05787d01ed",
+      "name": "Reply to a message",
+      "webhookId": "1741cadc-c762-4c27-86eb-43f4f374001e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "rFfGY0Xv3R87IMIX",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "topN": 30
+      },
+      "type": "@n8n/n8n-nodes-langchain.rerankerCohere",
+      "typeVersion": 1,
+      "position": [
+        1824,
+        576
+      ],
+      "id": "cf790974-819b-4907-bdbf-8f788d577e07",
+      "name": "Reranker Cohere",
+      "credentials": {
+        "cohereApi": {
+          "id": "DDK2AfWHPARECPsP",
+          "name": "CohereApi account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Trigger2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Question & Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze image": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "If5",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "If5",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "If5",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript11",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript14",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript13",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript15",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Microsoft Outlook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If5",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get a contact": {
+      "main": [
+        [
+          {
+            "node": "If3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript7": {
+      "main": [
+        [
+          {
+            "node": "Message a model2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create cases1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript9",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript9": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript10": {
+      "main": [
+        [
+          {
+            "node": "Create messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Create cases1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create messages": {
+      "main": [
+        [
+          {
+            "node": "If4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If4": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript8",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript16",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract from File1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract from File2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract from File3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Analyze image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Analyze image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Analyze image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript16",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript16",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript6": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create attachments": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript8": {
+      "main": [
+        [
+          {
+            "node": "Create attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Create document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript12",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript17",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If5": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript12": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript7",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create a contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a contact": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript10",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send message and wait for response": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get a contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript11": {
+      "main": [
+        [
+          {
+            "node": "If12",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript14": {
+      "main": [
+        [
+          {
+            "node": "If13",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript15": {
+      "main": [
+        [
+          {
+            "node": "If15",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript13": {
+      "main": [
+        [
+          {
+            "node": "If14",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If12": {
+      "main": [
+        [
+          {
+            "node": "Reply to a message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply to a message4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If13": {
+      "main": [
+        [
+          {
+            "node": "Reply to a message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply to a message5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If14": {
+      "main": [
+        [
+          {
+            "node": "Reply to a message2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply to a message6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If15": {
+      "main": [
+        [
+          {
+            "node": "Reply to a message3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply to a message7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript17": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript6",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript16": {
+      "main": [
+        [
+          {
+            "node": "Message a model1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript16",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Question & Answer": {
+      "main": [
+        [
+          {
+            "node": "Send message and wait for response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Question & Answer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Question & Answer",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI3": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Supabase Vector Store1",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Vector Store1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Question & Answer",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reranker Cohere": {
+      "ai_reranker": [
+        [
+          {
+            "node": "Supabase Vector Store1",
+            "type": "ai_reranker",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "bf1cd6a7-ccb3-41ff-91ad-c8bdb6bc7e5e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ac1e8879b68b274e118cf9677096a9439e605feacdcd5794bbf0d9084edaead7"
+  },
+  "id": "eXl9FhqxHm-IasG8fZXcm",
+  "tags": []
+}
