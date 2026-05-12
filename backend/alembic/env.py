@@ -6,8 +6,8 @@ from sqlalchemy import pool
 from alembic import context
 
 # import your models here
-from Chatpaper.backend.core.database import Base
-from Chatpaper.backend.models.auth import User
+from core.database import Base
+from models.auth import User
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config

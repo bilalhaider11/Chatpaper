@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Boolean, Integer, String, Enum, ForeignKey, DateTime, func
-from Chatpaper.backend.core.database import Base
+from core.database import Base
 
 
 class CommonModel(Base):

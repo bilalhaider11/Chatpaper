@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from sqladmin import Admin, ModelView
-from Chatpaper.backend.models.auth import User
+from models.auth import User
 app = FastAPI()
 
 

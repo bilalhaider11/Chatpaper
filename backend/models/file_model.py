@@ -1,6 +1,6 @@
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, func
 
-from Chatpaper.backend.core.database import Base
+from core.database import Base
 
 
 class FileRecord(Base):

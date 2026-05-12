@@ -1,6 +1,6 @@
 from fastapi import Depends, HTTPException
-from Chatpaper.backend.core import auth as auth_functions
-from Chatpaper.backend.schema import auth as schema_auth
+from core import auth as auth_functions
+from schema import auth as schema_auth
 
 # Role based access control
 class RoleChecker:

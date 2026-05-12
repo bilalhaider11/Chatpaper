@@ -1,14 +1,14 @@
 from fastapi import HTTPException, status, Depends
 from sqlalchemy.orm import Session
-from Chatpaper.backend.models.auth import UserRole, User
-from Chatpaper.backend.schema import auth as schema_auth
+from models.auth import UserRole, User
+from schema import auth as schema_auth
 from passlib.context import CryptContext
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from typing import Annotated
 
-from Chatpaper.backend.core.config import settings
-from Chatpaper.backend.core import dependencies
+from core.config import settings
+from core import dependencies
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

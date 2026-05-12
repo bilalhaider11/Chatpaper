@@ -1,8 +1,8 @@
 from sqlalchemy import Boolean, Column, Integer, String, Enum
 from enum import Enum as PythonEnum
 
-from Chatpaper.backend.core.database import Base
-from Chatpaper.backend.core.models import CommonModel
+from core.database import Base
+from core.models import CommonModel
 
 
 class UserRole(str, PythonEnum):

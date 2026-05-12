@@ -5,11 +5,11 @@ import shutil
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from Chatpaper.backend.core.dependencies import get_db
-from Chatpaper.backend.models.file_model import FileRecord
-from Chatpaper.backend.schema.file import FileRecordResponse, FileRecordUpdate
-from Chatpaper.backend.core.auth import get_current_user
-from Chatpaper.backend.services import files
+from core.dependencies import get_db
+from models.file_model import FileRecord
+from schema.file import FileRecordResponse, FileRecordUpdate
+from core.auth import get_current_user
+from services import files
 router = APIRouter(prefix="/files", tags=["files"])
 
 

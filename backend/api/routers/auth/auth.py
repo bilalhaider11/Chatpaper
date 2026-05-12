@@ -5,11 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from Chatpaper.backend.core import auth as auth_functions
-from Chatpaper.backend.schema import auth as schema_auth
-from Chatpaper.backend.core.config import settings
-from Chatpaper.backend.core.dependencies import get_db
-from Chatpaper.backend.models.check_role import RoleChecker
+from core import auth as auth_functions
+from schema import auth as schema_auth
+from core.config import settings
+from core.dependencies import get_db
+from models.check_role import RoleChecker
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

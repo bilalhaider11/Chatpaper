@@ -4,7 +4,7 @@ from typing import Annotated
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 
-from Chatpaper.backend.core.database import SessionLocal, engine
+from core.database import SessionLocal, engine
 
 # db connection
 def get_db():

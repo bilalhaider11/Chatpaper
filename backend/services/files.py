@@ -5,8 +5,8 @@ import shutil
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from Chatpaper.backend.core.dependencies import get_db
-from Chatpaper.backend.models.file_model import FileRecord
+from core.dependencies import get_db
+from models.file_model import FileRecord
 
 
 UPLOAD_DIR = Path(__file__).resolve().parents[4] / "files"

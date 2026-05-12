@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
-from Chatpaper.backend.models import auth
+from models import auth
 
 class UserBase(BaseModel):
 	email: str

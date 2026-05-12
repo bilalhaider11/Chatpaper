@@ -3,10 +3,10 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from Chatpaper.backend.core.database import engine
+from core.database import engine
 from sqladmin import Admin
-from Chatpaper.backend.core.models import auth, file_model
-from Chatpaper.backend.api.router import api_router
+from models import auth, file_model
+from api.router import api_router
 from .admin import UserAdmin
 
 auth.Base.metadata.create_all(bind=engine)
