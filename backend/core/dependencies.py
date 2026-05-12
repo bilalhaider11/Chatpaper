@@ -1,4 +1,3 @@
-from fastapi import Depends, status, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from typing import Annotated
 from sqlalchemy.orm import Session

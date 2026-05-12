@@ -6,6 +6,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from core import auth as auth_functions
+from services import auth as auth_service
 from schema import auth as schema_auth
 from core.config import settings
 from core.dependencies import get_db
@@ -42,10 +43,10 @@ def login_for_access_token(
 
 @router.post("/users", response_model=schema_auth.User)
 async def create_new_user(user: schema_auth.UserCreate, db: Session = Depends(get_db)):
-    db_user = auth_functions.get_user_by_email(db, user.email)
+    db_user = auth_service.get_user_by_email(db, user.email)
     if db_user:
         raise HTTPException(status_code=400, detail="User already exists")
-    return auth_functions.create_new_user(db, user)
+    return auth_service.create_new_user(db, user)
 
 
 @router.get(
@@ -54,7 +55,7 @@ async def create_new_user(user: schema_auth.UserCreate, db: Session = Depends(ge
     dependencies=[Depends(RoleChecker(["admin"]))],
 )
 async def read_all_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    return auth_functions.read_all_user(db, skip, limit)
+    return auth_service.read_all_user(db, skip, limit)
 
 
 @router.get("/users/me", response_model=schema_auth.User)
@@ -81,7 +82,7 @@ async def read_user_by_id(user_id: int, db: Session = Depends(get_db)):
 async def update_user(
     user_id: int, user: schema_auth.UserUpdate, db: Session = Depends(get_db)
 ):
-    return auth_functions.update_user(db, user_id, user)
+    return auth_service.update_user(db, user_id, user)
 
 
 @router.delete(
@@ -90,4 +91,4 @@ async def update_user(
     dependencies=[Depends(RoleChecker(["admin"]))],
 )
 async def delete_user(user_id: int, db: Session = Depends(get_db)):
-    return auth_functions.delete_user(db, user_id)
+    return auth_service.delete_user(db, user_id)
