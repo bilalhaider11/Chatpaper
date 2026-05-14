@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { login, tokenStore } from "../../services/api";
+import { login } from "../../api/axios";
+import {tokenStore} from "../../api/axios"
 import "./Login.css";
 
 type LoginProps = {

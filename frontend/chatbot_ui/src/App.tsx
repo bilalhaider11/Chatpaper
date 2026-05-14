@@ -3,7 +3,7 @@ import { useState } from "react";
 import Home from "./pages/home/Home";
 import Login from "./pages/login/Login";
 import Chatbot from "./pages/chatbot/Chatbot";
-import { tokenStore } from "./services/api";
+import { tokenStore } from "./api/axios";
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(

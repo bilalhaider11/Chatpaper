@@ -2,16 +2,15 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   deleteFile,
-  fetchCurrentUser,
+
   FileRecord,
   getFiles,
-  tokenStore,
   toFileUrl,
   uploadFile,
   User,
-} from "../../services/api";
+} from "../../services/files_api";
 import "./Home.css";
-
+import { fetchCurrentUser, tokenStore } from '../../api/axios'
 type HomeProps = {
   onLogout: () => void;
 };
@@ -33,6 +32,7 @@ function Home({ onLogout }: HomeProps) {
 
   useEffect(() => {
     const bootstrap = async () => {
+      console.log("tokenStore.getToken(): ", tokenStore.getToken())
       if (!tokenStore.getToken()) {
         navigate("/login", { replace: true });
         return;
@@ -123,6 +123,7 @@ function Home({ onLogout }: HomeProps) {
             </p>
 
             <input
+              placeholder="file"
 
               type="file"
               onChange={(event) =>
@@ -152,7 +153,7 @@ function Home({ onLogout }: HomeProps) {
                     </a>
                     <span>{Math.round(file.filesize / 1024)} KB</span>
                     <span>{file.is_active ? "Active" : "Inactive"}</span>
-                    
+
                     <button onClick={() => void handleDelete(file.id)}>
                       Delete
                     </button>
