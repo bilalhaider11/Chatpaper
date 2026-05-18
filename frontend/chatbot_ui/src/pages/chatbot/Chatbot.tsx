@@ -12,13 +12,14 @@ import {
   deleteConversationList,
   editConversationListTitle
 } from "../../services/conversation_api";
+import FileUpload from "../../components/fileUpload/FileUpload";
 
 function Chatbot() {
 
   // Inside your component:
   const [editingId, setEditingId] = useState(Number);
   const [editTitle, setEditTitle] = useState("");
-
+  const [isopen,setisopen] = useState(false);
   const navigate = useNavigate();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -55,8 +56,13 @@ function Chatbot() {
         setUser(currentUser);
         const list = await loadConversationList();
         if (list.length > 0) {
+          setisopen(false)
+
+          
           setSelectedConversationId(list[0].id);
           await loadMessages(list[0].id);
+        }else{
+          setisopen(true)
         }
       } catch {
         tokenStore.clear();
@@ -232,6 +238,7 @@ function Chatbot() {
             ))
           )}
         </nav>
+        
 
 
         <div className="sidebar-footer">
@@ -243,6 +250,7 @@ function Chatbot() {
           </button>
         </div>
       </aside>
+      
 
       <main className="chatbot-main">
         <header className="chatbot-header">
@@ -253,6 +261,8 @@ function Chatbot() {
         </header>
 
         <section className="chatbot-messages">
+          {/* Conditionally render the popup */}
+      {isopen && <FileUpload onClose={() => setisopen(false)} />}
           {!selectedConversationId && messages.length === 0 ? (
             <div className="chatbot-empty-state">
               <h2>How can I help you today?</h2>
@@ -297,9 +307,11 @@ function Chatbot() {
               Send
             </button>
           </form>
+          
         </footer>
       </main>
     </div>
+    
   );
 }
 
