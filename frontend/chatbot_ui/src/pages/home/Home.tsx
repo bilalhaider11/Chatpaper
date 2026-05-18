@@ -2,15 +2,14 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   deleteFile,
-
   FileRecord,
   getFiles,
   toFileUrl,
   uploadFile,
-  User,
 } from "../../services/files_api";
 import "./Home.css";
-import { fetchCurrentUser, tokenStore } from '../../api/axios'
+import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
+import { createConversationList } from "../../services/conversation_api";
 type HomeProps = {
   onLogout: () => void;
 };
@@ -32,7 +31,6 @@ function Home({ onLogout }: HomeProps) {
 
   useEffect(() => {
     const bootstrap = async () => {
-      console.log("tokenStore.getToken(): ", tokenStore.getToken())
       if (!tokenStore.getToken()) {
         navigate("/login", { replace: true });
         return;
@@ -67,12 +65,21 @@ function Home({ onLogout }: HomeProps) {
     } finally {
       setUploading(false);
     }
-  };
+  };// and make a proper folder structure 
 
 
   const handleDelete = async (id: number) => {
     await deleteFile(id);
     await loadFiles();
+  };
+
+  const handleStartChat = async () => {
+    try {
+      await createConversationList();
+      navigate("/chatbot");
+    } catch {
+      setMessage("Failed to start chat.");
+    }
   };
 
   const logout = () => {
@@ -92,7 +99,10 @@ function Home({ onLogout }: HomeProps) {
           <div className="home-topbar">
             <div className="home-badge">File Processing Platform</div>
             <div className="home-actions">
-              <Link to="/chatbot">Chatbot UI</Link>
+              <button type="button" onClick={() => void handleStartChat()}>
+                Start chat
+              </button>
+              <Link to="/chatbot">Open chatbot</Link>
               <button onClick={logout}>Logout</button>
             </div>
           </div>

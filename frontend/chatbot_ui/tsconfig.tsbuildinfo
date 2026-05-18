@@ -1,1 +1,1 @@
-{ "root": ["./src/App.tsx", "./src/main.tsx", "./src/components/fileUpload/FileUpload.tsx", "./src/pages/chatbot/Chatbot.tsx", "./src/pages/home/Home.tsx", "./src/pages/login/Login.tsx", "./src/services/files_api.ts"], "version": "6.0.3" }
+{"root":["./src/App.tsx","./src/main.tsx","./src/api/axios.ts","./src/components/fileUpload/FileUpload.tsx","./src/pages/chatbot/Chatbot.tsx","./src/pages/home/Home.tsx","./src/pages/login/Login.tsx","./src/services/conversation_api.ts","./src/services/files_api.ts"],"version":"6.0.3"}

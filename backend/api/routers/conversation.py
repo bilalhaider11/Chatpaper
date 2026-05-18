@@ -2,7 +2,7 @@ from pathlib import Path
 from uuid import uuid4
 import shutil
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import Body,APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from core.dependencies import get_db
@@ -25,8 +25,8 @@ async def conversation_list(
 
 @router.patch("/conversation-title/{conversation_id}")
 async def update_conversation_title(
-    conversation_id=int,
-    title=ConversationListBase,
+    conversation_id: int,
+    title: str = Body(..., embed=True),
     current_user=Depends(get_current_user),
     db: Session=Depends(get_db)   
 ):
@@ -55,7 +55,16 @@ async def conversation(
 @router.get("/get-conversation/{chat_list_id}",response_model=list[ConversationResponse])
 async def get_conversation(
     chat_list_id:int,
+    current_user=Depends(get_current_user),
     db: Session=Depends(get_db)
 ):
     return conversation_service.get_conversations(chat_list_id, db)
     
+
+@router.delete("/delete_list/{list_id}")
+async def delete_conversation_list(
+    list_id:int,
+    current_user=Depends(get_current_user),
+    db:Session=Depends(get_db)
+):
+    return conversation_service.delete_conversation_list(list_id, db)
