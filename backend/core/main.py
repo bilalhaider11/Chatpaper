@@ -8,11 +8,21 @@ from sqladmin import Admin
 from models import auth, file_model
 from api.router import api_router
 from .admin import UserAdmin
+#from fastapi.middleware.cors import CORSMiddleware
+#from starlette.requests import Request
+from starlette.middleware.sessions import SessionMiddleware
+#import uvicorn
+#from google.oauth2 import id_token
+#from google.auth.transport import requests
+#
 
 auth.Base.metadata.create_all(bind=engine)
 file_model.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+app.add_middleware(SessionMiddleware ,secret_key='secret-key')
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],

@@ -68,3 +68,18 @@ def get_conversations(chat_list_id, db):
     
     conversations = db.query(Conversation).order_by(Conversation.created_at.asc()).where(Conversation.chat_id == chat_list_id).all()
     return conversations
+
+def delete_conversation_list(id, db):
+    
+    statement = (
+        update(ConversationList)
+        .where(ConversationList.id == id)
+        .values(is_active=False)
+    )
+    
+    db.execute(statement)
+    db.commit()
+    
+    return {"Title": "deleted Successfully"}
+
+    

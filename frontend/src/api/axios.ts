@@ -1,7 +1,14 @@
 import axios from "axios";
-import {User} from "../services/files_api"
+
 const API_BASE_URL = "http://127.0.0.1:8000/api";
 const TOKEN_KEY = "auth_token";
+
+export type User = {
+  id: number;
+  email: string;
+  role: string;
+  is_active: boolean;
+};
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -9,7 +16,7 @@ export const api = axios.create({
 
 // Automatically attach JWT token to every request
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+  const token = localStorage.getItem(TOKEN_KEY);
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -37,7 +44,24 @@ export async function login(email: string, password: string) {
   return response.data;
 }
 
+export async function signup(email:string, password:string){
+  const payload = {
+  "email": email,
+  "password": password
+}
+  const response = await api.post(
+    "auth/users",
+    payload
+
+  )
+  return response.data
+}
+
 export async function fetchCurrentUser() {
   const response = await api.get<User>("/auth/users/me");
   return response.data;
+}
+
+export function toFileUrl(path: string) {
+  return `http://127.0.0.1:8000${path}`;
 }

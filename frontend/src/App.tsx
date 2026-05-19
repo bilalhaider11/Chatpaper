@@ -24,15 +24,17 @@ function App() {
       />
       <Route
         path="/"
-        element={
-          (
-            <Home onLogout={() => setIsAuthenticated(false)} />
-          )
-        }
+        element={<Home onLogout={() => setIsAuthenticated(false)} />}
       />
       <Route
         path="/chatbot"
-        element={ <Chatbot /> }
+        element={
+          isAuthenticated ? (
+            <Chatbot />
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
       />
       <Route
         path="*"

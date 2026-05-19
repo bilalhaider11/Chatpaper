@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { login } from "../../api/axios";
-import {tokenStore} from "../../api/axios"
+import { login, signup } from "../../api/axios";
+import {tokenStore} from "../../api/axios";
 import "./Login.css";
 
 type LoginProps = {
@@ -11,6 +11,7 @@ type LoginProps = {
 function Login({ onLoginSuccess }: LoginProps) {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
+  const [login_signup,setlogin_signup] = useState(false);
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -21,10 +22,16 @@ function Login({ onLoginSuccess }: LoginProps) {
     setLoading(true);
 
     try {
-      const response = await login(email, password);
-      tokenStore.setToken(response.access_token);
+      if (login_signup){
+        const response = await signup(email, password);
+
+      }
+      const login_res = await login(email, password);  
+      tokenStore.setToken(login_res.access_token);
       onLoginSuccess();
       navigate("/", { replace: true });
+      
+      
     } catch {
       setError("Invalid credentials. Please try again.");
     } finally {
@@ -52,9 +59,14 @@ function Login({ onLoginSuccess }: LoginProps) {
           required
         />
         {error ? <p className="login-error">{error}</p> : null}
-        <button type="submit" disabled={loading}>
+        <>
+        <button onClick={() => setlogin_signup(false)} type="submit" disabled={loading}>
           {loading ? "Signing in..." : "Login"}
         </button>
+        <button onClick={() => setlogin_signup(true)} type="submit" disabled={loading}>
+          {loading ? "Signing up..." : "Signup"}
+        </button>
+        </>
       </form>
     </div>
   );
