@@ -6,8 +6,7 @@ from core.models import CommonModel
 
 
 class UserRole(str, PythonEnum):
-    customer = "customer"
-    vendor = "vendor"
+    user = "user"
     admin = "admin"
 
 
@@ -17,6 +16,6 @@ class User(CommonModel):
     email = Column(String, unique=True, index=True, nullable=False)
     password = Column(String, nullable=False)
 
-    role = Column(Enum(UserRole), default=UserRole.customer)
+    role = Column(Enum(UserRole), default=UserRole.user)
 
 

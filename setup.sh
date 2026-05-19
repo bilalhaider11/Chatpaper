@@ -11,37 +11,43 @@ echo ""
 
 # ── Backend ──────────────────────────────────────────────────────────────────
 
-echo "[1/5] Creating Python virtual environment..."
+echo "[1/7] Creating Python virtual environment..."
 cd "$BACKEND_DIR"
 python3 -m venv venv
 
-echo "[2/5] Installing backend dependencies..."
+echo "[2/7] Installing backend dependencies..."
 source venv/bin/activate
 pip install --quiet --upgrade pip
 pip install --quiet -r requirements.txt
 
-echo "[3/5] Setting up .env file..."
+echo "[3/7] Setting up .env file..."
 if [ ! -f "$BACKEND_DIR/.env" ]; then
     SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
     cat > "$BACKEND_DIR/.env" <<EOF
 SECRET_KEY=$SECRET_KEY
 ALGORITHM=HS256
-DATABASE=sqlite:///./chatpaper.db
-ACCESS_TOKEN_EXPIRE_MINUTES=30
+DATABASE=postgresql://postgres:postgres@127.0.0.1:5433/chatpaper
+ACCESS_TOKEN_EXPIRE_MINUTES=600
 EOF
-    echo "      .env created with a generated SECRET_KEY."
+    echo "      .env created."
 else
     echo "      .env already exists — skipped."
 fi
 
-echo "[4/5] Running database migrations..."
+echo "[4/7] Creating database..."
+python3 scripts/create_db.py
+
+echo "[5/7] Running database migrations..."
 alembic upgrade head
+
+echo "[6/7] Seeding admin user..."
+python3 scripts/seed.py
 
 deactivate
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 
-echo "[5/5] Installing frontend dependencies..."
+echo "[7/7] Installing frontend dependencies..."
 cd "$FRONTEND_DIR"
 npm install --silent
 
