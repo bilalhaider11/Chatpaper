@@ -56,8 +56,6 @@ async def login(request: Request):
     referer = request.headers.get("referer")
     frontend_url = os.getenv("FRONTEND_URL")
     redirect_url = os.getenv("REDIRECT_URL")
-    print("..............................................................................................")
-    print("referer: ",referer)
     
     request.session["login_redirect"] = frontend_url 
     
