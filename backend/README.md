@@ -1,76 +1,129 @@
-# FastAPI-Role Based Access Control
-## There are multiple types of user like
-* customer
-* admin
-* vendor
-* - They have different access control on the project.
+# Chatpaper — Backend
 
-## Covered topics
-* Enum types
-* Abstract model like common model
-* RBAC with dependenies and routes.
-* Datetime in SQLAlchemy and Pydantic
-* Alembic = database migrations
-* Alembic = database migrations
-* sqladmin = SQLAlchemy Admin
+FastAPI backend for the Chatpaper application. Handles authentication, file uploads, and conversation management.
 
-## Developed API
-| SRL | METHOD | ROUTE | FUNCTIONALITY | Required Fields | ACCESS |
-| ------- | ------- | ----- | ------------- | ------------- | ------------- |
-| *1* | *POST* | ```/auth/token``` | _Login user_| _email, password_| _All users_|
-| *2* | *POST* | ```/auth/users/``` | _Create new user_|_email, password_| _Anyone_|
-| *3* | *GET* | ```/auth/users/``` | _Get all users list_|_None_| _admin_|
-| *4* | *GET* | ```/auth/users/me/``` | _Get current user details_|_None_| authorized|
-| *5* | *GET* | ```/auth/users/{user_id}``` | _Get indivisual users details_|_None_| _Admin_|
-| *6* | *PATCH* | ```/auth/users/{user_id}``` | _Update the user partially_|_email, password, is_active, role_| _Admin_|
-| *7* | *DELETE* | ```auth/users/{user_id}``` | _Delete the user_|_None_| _admin_|
-| *8* | *GET* | ```/``` | _Home page_|_None_| _anyone_|
-| *9* | *GET* | ```/admin``` | _Admin Dashboard_|_None_| admin_|
+## Tech Stack
 
+- **Language:** Python 3.11+
+- **Framework:** FastAPI 0.109
+- **ORM:** SQLAlchemy 2.0
+- **Migrations:** Alembic
+- **Auth:** JWT via python-jose + passlib
+- **Admin:** SQLAdmin
+- **Server:** Uvicorn
 
-# Tools
-### Back-end
-#### Language:
-	Python (3.11.6)
+## Project Structure
 
-#### Frameworks:
-	FastAPI (0.108.0)
-    pydantic (2.5.3)
-	
-#### Other libraries / tools:
-	SQLAlchemy == 2.0.25
-    starlette == 0.32.0.post1
-    uvicorn == 0.25.0
-    python-jose == 3.3.0
-    alembic == 1.13.1
-	
-### Database:
-	SQLite
-
-# Setup
-The first thing to do is to clone the repository:
-```sh
-$ https://github.com/MahmudJewel/FastAPI-Role-based-auth
+```
+backend/
+├── api/
+│   └── routers/
+│       ├── auth/         # Auth routes (login, register, user management)
+│       ├── file_handling/ # File upload/download routes
+│       └── conversation.py # Conversation management routes
+├── core/
+│   ├── main.py           # FastAPI app factory, middleware, mounts
+│   ├── config.py         # Settings loaded from .env
+│   ├── database.py       # SQLAlchemy engine & session
+│   ├── auth.py           # JWT utilities
+│   └── dependencies.py   # Shared FastAPI dependencies
+├── models/               # SQLAlchemy models
+├── schema/               # Pydantic schemas
+├── services/             # Business logic
+├── alembic/              # Database migration files
+├── main.py               # Entry point
+└── requirements.txt
 ```
 
-Create a virtual environment to install dependencies in and activate it:
-```sh
-$ cd FastAPI-jwt-auth
-$ python -m venv venv
-$ source venv/bin/activate
-```
-Then install the dependencies:
-```sh
-(venv)$ pip install -r requirements.txt
-```
-Note the `(venv)` in front of the prompt. This indicates that this terminal
-session operates in a virtual environment set up by `virtualenv2`.
+## Setup
 
-Once `pip` has finished downloading the dependencies:
-```sh
-(venv)$ uvicorn core.main:app --reload
+### 1. Create and activate a virtual environment
+
+```bash
+python -m venv venv
+
+# Linux/macOS
+source venv/bin/activate
+
+# Windows
+venv\Scripts\activate
 ```
 
-# Happy Coding
-## From ==> Juwel Mahmud
+### 2. Install dependencies
 
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Configure environment variables
+
+Create a `.env` file in this directory:
+
+```env
+SECRET_KEY=your_secret_key_here
+ALGORITHM=HS256
+DATABASE=sqlite:///./chatpaper.db
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+```
+
+Generate a secure `SECRET_KEY`:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+### 4. Run database migrations
+
+```bash
+alembic upgrade head
+```
+
+### 5. Start the server
+
+```bash
+uvicorn main:app --reload
+```
+
+Server runs at `http://localhost:8000`.
+
+## Useful URLs
+
+| URL | Description |
+|-----|-------------|
+| `http://localhost:8000/docs` | Interactive API docs (Swagger UI) |
+| `http://localhost:8000/redoc` | ReDoc API docs |
+| `http://localhost:8000/admin` | SQLAdmin dashboard |
+
+## API Routes
+
+### Auth — `/api/auth`
+
+| Method | Route | Description | Access |
+|--------|-------|-------------|--------|
+| POST | `/token` | Login, returns JWT | Public |
+| POST | `/users/` | Register a new user | Public |
+| GET | `/users/` | List all users | Admin |
+| GET | `/users/me/` | Get current user | Authorized |
+| GET | `/users/{user_id}` | Get user by ID | Admin |
+| PATCH | `/users/{user_id}` | Update user | Admin |
+| DELETE | `/users/{user_id}` | Delete user | Admin |
+
+### Files — `/api/files`
+
+File upload and retrieval endpoints.
+
+### Conversation — `/api/conversation`
+
+| Method | Route | Description | Access |
+|--------|-------|-------------|--------|
+| POST | `/inconversationlist` | Create a conversation list | Authorized |
+| PATCH | `/conversation-title/{id}` | Update conversation title | Authorized |
+
+## Creating a Migration
+
+After changing a model, generate and apply a new migration:
+
+```bash
+alembic revision --autogenerate -m "describe your change"
+alembic upgrade head
+```

@@ -7,10 +7,14 @@ from alembic import context
 
 # import your models here
 from core.database import Base
+from core.config import settings
 from models.auth import User
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Override sqlalchemy.url from .env so alembic.ini value is ignored.
+config.set_main_option("sqlalchemy.url", settings.database)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
