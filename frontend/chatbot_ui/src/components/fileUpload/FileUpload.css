@@ -10,6 +10,13 @@
   box-sizing: border-box;
 }
 
+.upload-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .upload-card-title {
   margin: 0;
   color: #f8fafc;
@@ -56,4 +63,111 @@
 
 .selected-file strong {
   color: #ffffff;
+}
+
+.upload-description-input,
+.upload-submit-btn {
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #0b1325;
+  color: #e2e8f0;
+  font-size: 0.95rem;
+}
+
+.upload-submit-btn {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.upload-submit-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.upload-message {
+  margin: 0;
+  color: #93c5fd;
+  font-size: 0.9rem;
+}
+
+.file-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.file-list h3 {
+  margin: 0;
+  color: #f8fafc;
+}
+
+.file-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.file-row a {
+  color: #93c5fd;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-row span {
+  color: #cbd5e1;
+  font-size: 0.85rem;
+}
+
+.file-row button {
+  padding: 7px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  background: #0b1325;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.upload-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.upload-modal-panel {
+  width: 100%;
+  max-width: 480px;
+}
+
+.upload-modal-close {
+  border: none;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.upload-modal-close:hover {
+  color: #f8fafc;
+}
+
+@media (max-width: 640px) {
+  .file-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  }
 }

@@ -44,6 +44,19 @@ export async function login(email: string, password: string) {
   return response.data;
 }
 
+export async function signup(email:string, password:string){
+  const payload = {
+  "email": email,
+  "password": password
+}
+  const response = await api.post(
+    "auth/users",
+    payload
+
+  )
+  return response.data
+}
+
 export async function fetchCurrentUser() {
   const response = await api.get<User>("/auth/users/me");
   return response.data;

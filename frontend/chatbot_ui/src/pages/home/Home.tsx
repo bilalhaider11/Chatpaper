@@ -1,15 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import {
-  deleteFile,
-  FileRecord,
-  getFiles,
-  toFileUrl,
-  uploadFile,
-} from "../../services/files_api";
+import FileUpload from "../../components/fileUpload/FileUpload";
 import "./Home.css";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
 import { createConversationList } from "../../services/conversation_api";
+
 type HomeProps = {
   onLogout: () => void;
 };
@@ -17,17 +12,8 @@ type HomeProps = {
 function Home({ onLogout }: HomeProps) {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [description, setDescription] = useState("");
-  const [files, setFiles] = useState<FileRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
-
-  const loadFiles = async () => {
-    const fileList = await getFiles();
-    setFiles(fileList);
-  };
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -38,7 +24,6 @@ function Home({ onLogout }: HomeProps) {
       try {
         const currentUser = await fetchCurrentUser();
         setUser(currentUser);
-        await loadFiles();
       } catch {
         tokenStore.clear();
         navigate("/login", { replace: true });
@@ -49,29 +34,6 @@ function Home({ onLogout }: HomeProps) {
 
     void bootstrap();
   }, [navigate]);
-
-  const handleUpload = async () => {
-    if (!selectedFile) return;
-    setUploading(true);
-    setMessage("");
-    try {
-      await uploadFile(selectedFile, description);
-      setSelectedFile(null);
-      setDescription("");
-      setMessage("File uploaded successfully.");
-      await loadFiles();
-    } catch {
-      setMessage("Failed to upload file.");
-    } finally {
-      setUploading(false);
-    }
-  };// and make a proper folder structure 
-
-
-  const handleDelete = async (id: number) => {
-    await deleteFile(id);
-    await loadFiles();
-  };
 
   const handleStartChat = async () => {
     try {
@@ -123,55 +85,16 @@ function Home({ onLogout }: HomeProps) {
             <li>Fast cloud-ready processing pipeline</li>
             <li>Enterprise-grade architecture and support</li>
           </ul>
+
+          {message ? <p className="home-status-message">{message}</p> : null}
         </div>
 
         <div className="home-right">
-          <div className="upload-card">
-            <h2 className="upload-card-title">Upload your file</h2>
-            <p className="upload-card-subtitle">
-              Files are saved in backend `/files` and metadata is stored in DB.
-            </p>
-
-            <input
-              placeholder="file"
-
-              type="file"
-              onChange={(event) =>
-                setSelectedFile(event.target.files?.[0] ?? null)
-              }
-            />
-            <input
-              type="text"
-              placeholder="Description (optional)"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-            />
-            <button onClick={handleUpload} disabled={!selectedFile || uploading}>
-              {uploading ? "Uploading..." : "Upload"}
-            </button>
-            {message ? <p className="upload-message">{message}</p> : null}
-
-            <div className="file-list">
-              <h3>Files</h3>
-              {files.length === 0 ? (
-                <p className="upload-card-subtitle">No files uploaded yet.</p>
-              ) : (
-                files.map((file) => (
-                  <div key={file.id} className="file-row">
-                    <a href={toFileUrl(file.filepath)} target="_blank" rel="noreferrer">
-                      {file.filename}
-                    </a>
-                    <span>{Math.round(file.filesize / 1024)} KB</span>
-                    <span>{file.is_active ? "Active" : "Inactive"}</span>
-
-                    <button onClick={() => void handleDelete(file.id)}>
-                      Delete
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          <FileUpload
+            variant="embedded"
+            showFileList
+            subtitle="Files are saved in backend `/files` and metadata is stored in DB."
+          />
         </div>
       </div>
     </div>

@@ -13,11 +13,12 @@ import {
   editConversationListTitle
 } from "../../services/conversation_api";
 import FileUpload from "../../components/fileUpload/FileUpload";
+import { DeleteIcon, EditIcon } from "../../components/icons/ActionIcons";
 
 function Chatbot() {
 
   // Inside your component:
-  const [editingId, setEditingId] = useState(Number);
+  const [editingId, setEditingId] = useState(0);
   const [editTitle, setEditTitle] = useState("");
   const [isopen,setisopen] = useState(false);
   const navigate = useNavigate();
@@ -138,25 +139,37 @@ function Chatbot() {
     navigate("/login", { replace: true });
   };
 
-  const handleDelete = (id: number) => {
-
-    deleteConversationList(id);
+  const handleDelete = async (id: number) => {
+    await deleteConversationList(id);
+    const list = await loadConversationList();
+    if (selectedConversationId === id) {
+      const nextId = list[0]?.id ?? null;
+      setSelectedConversationId(nextId);
+      if (nextId) {
+        await loadMessages(nextId);
+      } else {
+        setMessages([]);
+        setisopen(true);
+      }
+    }
   };
 
-
-  const handleStartEdit = (conversation) => {
+  const handleStartEdit = (conversation: ConversationListItem) => {
     setEditingId(conversation.id);
     setEditTitle(conversation.conversation_title || "New chat");
   };
 
   // Saves the input and closes the form
-  const handleSaveEdit = async (e, id:number) => {
+  const handleSaveEdit = async (
+    e: React.FormEvent,
+    id: number
+  ) => {
     e.preventDefault();
 
     if (!editTitle.trim()) return;
 
     try {
-      editConversationListTitle(editingId,editTitle)
+      await editConversationListTitle(editingId, editTitle);
       setConversations(prev =>
         prev.map(item => item.id === id ? { ...item, conversation_title: editTitle } : item)
       );
@@ -228,9 +241,29 @@ function Chatbot() {
                     <span className="conversation-title">
                       {conversation.conversation_title || "New chat"}
                     </span>
-                    <div className="action-buttons" style={{ display: 'flex', marginLeft: 'auto' }}>
-                      <span className="delete-button" onClick={(e) => { e.stopPropagation(); handleDelete(conversation.id); }}>  Delete  </span>
-                      <span className="edit-button" onClick={(e) => { e.stopPropagation(); handleStartEdit(conversation); }}> Edit </span>
+                    <div className="conversation-actions">
+                      <button
+                        type="button"
+                        className="conversation-icon-btn edit"
+                        aria-label="Edit conversation title"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStartEdit(conversation);
+                        }}
+                      >
+                        <EditIcon />
+                      </button>
+                      <button
+                        type="button"
+                        className="conversation-icon-btn delete"
+                        aria-label="Delete conversation"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDelete(conversation.id);
+                        }}
+                      >
+                        <DeleteIcon />
+                      </button>
                     </div>
                   </>
                 )}
@@ -262,7 +295,13 @@ function Chatbot() {
 
         <section className="chatbot-messages">
           {/* Conditionally render the popup */}
-      {isopen && <FileUpload onClose={() => setisopen(false)} />}
+      {isopen ? (
+        <FileUpload
+          variant="modal"
+          onClose={() => setisopen(false)}
+          subtitle="Upload a document to use with this chat session."
+        />
+      ) : null}
           {!selectedConversationId && messages.length === 0 ? (
             <div className="chatbot-empty-state">
               <h2>How can I help you today?</h2>

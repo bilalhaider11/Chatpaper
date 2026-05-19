@@ -104,10 +104,82 @@
 }
 
 .conversation-title {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 0.9rem;
+}
+
+.conversation-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.conversation-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.conversation-icon-btn.edit {
+    color: #6994e6;
+}
+
+.conversation-icon-btn.delete {
+    color: #e57373;
+}
+
+.conversation-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.conversation-icon-btn.edit:hover {
+    color: #93b4f5;
+}
+
+.conversation-icon-btn.delete:hover {
+    color: #ef9a9a;
+}
+
+.edit-form {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+
+.edit-input {
+    flex: 1;
+    min-width: 0;
+    background: #2f2f2f;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: #ececec;
+    font-size: 0.85rem;
+}
+
+.edit-form button {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: transparent;
+    color: #ececec;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    cursor: pointer;
 }
 
 .sidebar-footer {
@@ -275,14 +347,6 @@
     padding: 0 22px;
     cursor: pointer;
     font-weight: 600;
-}
-
-.delete-button {
-    color: #b90e0e;
-}
-
-.edit-button {
-    color: #6994e6
 }
 
 .chatbot-input button:disabled {
