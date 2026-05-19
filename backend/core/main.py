@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from core.database import engine
 from sqladmin import Admin
 from models import auth, file_model
+import models.ingestion  # noqa: F401 — registers DocumentParent, IngestionJob with Base
 from api.router import api_router
 from .admin import UserAdmin
 

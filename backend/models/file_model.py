@@ -18,3 +18,10 @@ class FileRecord(Base):
     description = Column(Text(), nullable=True)
     uploaded_at = Column(DateTime(timezone=False), server_default=func.now(), nullable=False)
     is_active = Column("is_Active", Boolean, nullable=False, default=True)
+
+    # Ingestion metadata
+    file_hash = Column(String(64), nullable=True)
+    document_version = Column(Integer, nullable=True)
+    ingestion_status = Column(String(30), nullable=True)
+    language = Column(String(10), nullable=True)
+    total_pages = Column(Integer, nullable=True)
