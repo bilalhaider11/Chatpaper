@@ -1,22 +1,13 @@
-"""
-Phase 0 — test_config.py
-
-Verifies that core/config.py:
-  - Exposes every required settings field
-  - Applies correct types (int, float, str, Optional[str])
-  - Uses correct default values when env vars are absent
-  - Preserves existing auth / db fields unchanged
-"""
+"""Tests for core/config.py — field types, defaults, and backward-compat."""
 
 import pytest
 
 from core.config import Settings, settings
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def make_settings(**overrides) -> Settings:
-    """Instantiate Settings with explicit field values to bypass os.getenv defaults."""
+    """Build a Settings instance with explicit values, bypassing os.getenv defaults."""
     defaults = {
         "secret_key": "test-secret",
         "algorithm": "HS256",
@@ -45,7 +36,6 @@ def make_settings(**overrides) -> Settings:
     return Settings(**defaults)
 
 
-# ── Singleton availability ────────────────────────────────────────────────────
 
 class TestSettingsSingleton:
     def test_settings_singleton_is_importable(self):
@@ -55,7 +45,6 @@ class TestSettingsSingleton:
         assert isinstance(settings, Settings)
 
 
-# ── Legacy fields (must not be broken) ───────────────────────────────────────
 
 class TestLegacyFields:
     def test_secret_key_field_exists(self):
@@ -76,7 +65,6 @@ class TestLegacyFields:
         assert s.access_token_expire_minutes == 30
 
 
-# ── LLM / Embedding settings ─────────────────────────────────────────────────
 
 class TestLLMSettings:
     def test_openai_api_key_is_none_by_default(self):
@@ -112,7 +100,6 @@ class TestLLMSettings:
         assert s.llm_summary_temperature == pytest.approx(1.0)
 
 
-# ── ChromaDB settings ─────────────────────────────────────────────────────────
 
 class TestChromaSettings:
     def test_chroma_host_default(self):
@@ -148,7 +135,6 @@ class TestChromaSettings:
         assert s.chroma_collection_summaries == "my_summaries"
 
 
-# ── Celery / Redis settings ───────────────────────────────────────────────────
 
 class TestCeleryRedisSettings:
     def test_redis_url_default(self):
@@ -172,7 +158,6 @@ class TestCeleryRedisSettings:
         assert s.redis_url == "redis://myhost:6380/2"
 
 
-# ── Ingestion limit settings ──────────────────────────────────────────────────
 
 class TestIngestionLimitSettings:
     @pytest.mark.parametrize("field,expected", [
@@ -222,7 +207,6 @@ class TestIngestionLimitSettings:
         assert s.max_file_size_mb == 50
 
 
-# ── Edge cases ────────────────────────────────────────────────────────────────
 
 class TestSettingsEdgeCases:
     def test_settings_instances_are_independent(self):

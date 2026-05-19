@@ -1,14 +1,4 @@
-"""
-Phase 0 — test_chroma_client.py
-
-Verifies that core/chroma.py:
-  - Creates the ChromaDB HttpClient with host/port from settings
-  - Returns the same client instance on repeated calls (singleton)
-  - Calls get_or_create_collection with the correct collection names and metadata
-  - Uses cosine distance metric for both collections
-  - reset_chroma_client() clears the singleton so the next call creates a new one
-  - Propagates connection errors from chromadb.HttpClient without swallowing them
-"""
+"""Tests for core/chroma.py — client creation, singleton behavior, collection setup."""
 
 from unittest.mock import MagicMock, patch, call
 
@@ -26,13 +16,11 @@ from core.config import settings
 
 @pytest.fixture(autouse=True)
 def clear_singleton():
-    """Ensure every test starts with a fresh (None) singleton."""
     reset_chroma_client()
     yield
     reset_chroma_client()
 
 
-# ── Client creation ───────────────────────────────────────────────────────────
 
 class TestGetChromaClient:
     def test_creates_http_client_with_correct_host(self):
@@ -76,7 +64,6 @@ class TestGetChromaClient:
                 get_chroma_client()
 
 
-# ── Singleton reset ───────────────────────────────────────────────────────────
 
 class TestResetChromaClient:
     def test_reset_clears_singleton(self):
@@ -106,7 +93,6 @@ class TestResetChromaClient:
             assert client1 is not client2
 
 
-# ── Child chunks collection ───────────────────────────────────────────────────
 
 class TestGetChildChunksCollection:
     def _mock_client(self):
@@ -147,7 +133,6 @@ class TestGetChildChunksCollection:
             assert name == "child_chunks"
 
 
-# ── Document summaries collection ─────────────────────────────────────────────
 
 class TestGetDocumentSummariesCollection:
     def _mock_client(self):
@@ -188,7 +173,6 @@ class TestGetDocumentSummariesCollection:
             assert name == "document_summaries"
 
 
-# ── Collection names are distinct ─────────────────────────────────────────────
 
 class TestCollectionNamesAreDistinct:
     def test_child_chunks_and_summaries_have_different_names(self):

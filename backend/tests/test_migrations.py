@@ -1,12 +1,7 @@
 """
-Phase 1 — test_migrations.py
-
-Integration tests verifying that Alembic migrations produce the correct
-schema in the database. Marked @pytest.mark.integration and automatically
-skipped when the configured PostgreSQL instance is unreachable.
-
-Run integration tests with:
-    pytest -m integration
+Integration tests that verify the Alembic-migrated schema.
+Skipped automatically if PostgreSQL is unreachable.
+Run with: pytest -m integration
 """
 
 import os
@@ -41,7 +36,6 @@ def alembic_cfg():
     return cfg
 
 
-# ── Tables exist ──────────────────────────────────────────────────────────────
 
 class TestTablesExist:
     def test_document_parents_table_exists(self, db_engine):
@@ -54,7 +48,6 @@ class TestTablesExist:
         assert "files_data" in sa_inspect(db_engine).get_table_names()
 
 
-# ── files_data new columns ────────────────────────────────────────────────────
 
 class TestFilesDataNewColumns:
     def _col_names(self, db_engine):
@@ -80,7 +73,6 @@ class TestFilesDataNewColumns:
         assert "ix_files_data_user_id_file_hash" in indexes
 
 
-# ── document_parents structure ────────────────────────────────────────────────
 
 class TestDocumentParentsStructure:
     def _col_names(self, db_engine):
@@ -119,7 +111,6 @@ class TestDocumentParentsStructure:
         assert "ix_document_parents_chunk_index" in indexes
 
 
-# ── ingestion_jobs structure ──────────────────────────────────────────────────
 
 class TestIngestionJobsStructure:
     EXPECTED_COLUMNS = {
@@ -158,7 +149,6 @@ class TestIngestionJobsStructure:
         assert "ix_ingestion_jobs_celery_task_id" in indexes
 
 
-# ── Alembic head consistency ──────────────────────────────────────────────────
 
 class TestAlembicHeadConsistency:
     def test_database_is_at_latest_revision(self, db_engine, alembic_cfg):

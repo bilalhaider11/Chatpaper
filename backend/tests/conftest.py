@@ -1,24 +1,11 @@
-"""
-Shared fixtures for all test phases.
-
-External services (ChromaDB, Redis, Celery broker) are never contacted
-during tests — every client is mocked at the boundary.
-"""
+"""Shared fixtures. All external services (ChromaDB, Redis, Celery) are mocked."""
 
 import pytest
 
 
 @pytest.fixture(autouse=False)
 def override_settings(monkeypatch):
-    """
-    Yield a helper that lets individual tests patch settings fields
-    for the duration of the test, then restore them automatically.
-
-    Usage inside a test:
-        def test_something(override_settings):
-            override_settings("chroma_host", "myhost")
-            ...
-    """
+    # patches a settings field for the test then restores it, e.g. override_settings("chroma_host", "x")
     from core.config import settings
     originals: dict = {}
 

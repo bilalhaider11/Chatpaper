@@ -1,10 +1,4 @@
-"""
-Phase 1 — test_models_ingestion.py
-
-Verifies ORM model structure for DocumentParent, IngestionJob, and the
-five new columns added to FileRecord. Uses __table__ introspection only —
-no database connection is required.
-"""
+"""ORM structure tests for DocumentParent, IngestionJob, and FileRecord ingestion columns."""
 
 import pytest
 from sqlalchemy import Integer, String, Text, DateTime
@@ -13,7 +7,6 @@ from models.ingestion import DocumentParent, IngestionJob
 from models.file_model import FileRecord
 
 
-# ── DocumentParent ────────────────────────────────────────────────────────────
 
 class TestDocumentParentTable:
     def _cols(self):
@@ -107,7 +100,6 @@ class TestDocumentParentTable:
         assert len(list(self._cols())) == 8
 
 
-# ── IngestionJob ──────────────────────────────────────────────────────────────
 
 class TestIngestionJobTable:
     EXPECTED_COLUMNS = {
@@ -209,7 +201,6 @@ class TestIngestionJobTable:
         assert self._cols()["updated_at"].server_default is not None
 
 
-# ── IngestionJob status constants ─────────────────────────────────────────────
 
 class TestIngestionJobStatusConstants:
     def test_status_queued(self):
@@ -267,7 +258,6 @@ class TestIngestionJobStatusConstants:
         assert stages.issubset(IngestionJob.VALID_STATUSES)
 
 
-# ── FileRecord new ingestion columns ─────────────────────────────────────────
 
 class TestFileRecordIngestionColumns:
     def _cols(self):
@@ -328,7 +318,6 @@ class TestFileRecordIngestionColumns:
         assert self._cols()["total_pages"].nullable
 
 
-# ── Cross-model consistency ───────────────────────────────────────────────────
 
 class TestCrossModelConsistency:
     def test_document_parent_and_ingestion_job_target_same_table(self):

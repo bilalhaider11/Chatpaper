@@ -8,30 +8,30 @@ load_dotenv()
 
 
 class Settings(BaseModel):
-    # ── Existing auth / db ────────────────────────────────────────────────────
+    # auth / db
     secret_key: str = os.getenv("SECRET_KEY", "")
     algorithm: str = os.getenv("ALGORITHM", "HS256")
     database: str = os.getenv("DATABASE", "")
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
-    # ── LLM / Embeddings ─────────────────────────────────────────────────────
+    # LLM / embeddings
     openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     openai_embedding_model: str = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
     openai_chat_model: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
     llm_summary_temperature: float = float(os.getenv("LLM_SUMMARY_TEMPERATURE", "0.1"))
 
-    # ── ChromaDB ─────────────────────────────────────────────────────────────
+    # chroma
     chroma_host: str = os.getenv("CHROMA_HOST", "localhost")
     chroma_port: int = int(os.getenv("CHROMA_PORT", "8001"))
     chroma_collection_child_chunks: str = os.getenv("CHROMA_COLLECTION_CHILD_CHUNKS", "child_chunks")
     chroma_collection_summaries: str = os.getenv("CHROMA_COLLECTION_SUMMARIES", "document_summaries")
 
-    # ── Celery + Redis ────────────────────────────────────────────────────────
+    # celery / redis
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     celery_broker_url: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
     celery_result_backend: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
 
-    # ── Ingestion limits ──────────────────────────────────────────────────────
+    # ingestion limits
     max_file_size_mb: int = int(os.getenv("MAX_FILE_SIZE_MB", "200"))
     max_pages_per_doc: int = int(os.getenv("MAX_PAGES_PER_DOC", "500"))
     parent_chunk_size: int = int(os.getenv("PARENT_CHUNK_SIZE", "1800"))

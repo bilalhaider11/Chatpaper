@@ -1,14 +1,4 @@
-"""
-Phase 0 — test_redis_client.py
-
-Verifies that core/redis_client.py:
-  - Creates a Redis client from the URL in settings
-  - Returns the same instance on repeated calls (singleton)
-  - Creates the client with decode_responses=True
-  - reset_redis_client() clears the singleton
-  - Does NOT raise on creation when Redis is unreachable (lazy connection)
-  - Raises an error only when a command is issued against an unavailable server
-"""
+"""Tests for core/redis_client.py — client creation, singleton behavior, lazy connection."""
 
 from unittest.mock import MagicMock, patch
 
@@ -20,13 +10,11 @@ from core.config import settings
 
 @pytest.fixture(autouse=True)
 def clear_singleton():
-    """Ensure every test starts with a fresh (None) singleton."""
     reset_redis_client()
     yield
     reset_redis_client()
 
 
-# ── Client creation ───────────────────────────────────────────────────────────
 
 class TestGetRedisClient:
     def test_creates_client_from_url(self):
@@ -56,7 +44,6 @@ class TestGetRedisClient:
             assert client is mock_redis
 
 
-# ── Singleton behaviour ───────────────────────────────────────────────────────
 
 class TestRedisClientSingleton:
     def test_same_instance_returned_on_repeated_calls(self):
@@ -74,7 +61,6 @@ class TestRedisClientSingleton:
             assert mock_from_url.call_count == 1
 
 
-# ── Singleton reset ───────────────────────────────────────────────────────────
 
 class TestResetRedisClient:
     def test_reset_clears_singleton(self):
@@ -104,14 +90,10 @@ class TestResetRedisClient:
             assert c1 is not c2
 
 
-# ── Lazy connection (no eager connect at creation) ────────────────────────────
 
 class TestRedisLazyConnection:
     def test_client_creation_does_not_raise_when_redis_unreachable(self):
-        """
-        Redis.from_url() itself is lazy — it does not connect until a command
-        is issued. Verify that get_redis_client() never forces an eager ping.
-        """
+        # from_url is lazy so we must never call ping during construction
         with patch("core.redis_client.redis_lib.Redis.from_url") as mock_from_url:
             mock_redis = MagicMock()
             mock_from_url.return_value = mock_redis
@@ -119,10 +101,6 @@ class TestRedisLazyConnection:
             mock_redis.ping.assert_not_called()
 
     def test_connection_error_raised_only_on_command(self):
-        """
-        If the server is unreachable, the error surfaces on the first command
-        (e.g. ping), not during client construction.
-        """
         import redis as redis_lib
         mock_redis = MagicMock()
         mock_redis.ping.side_effect = redis_lib.exceptions.ConnectionError("unreachable")

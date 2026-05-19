@@ -8,11 +8,7 @@ _redis_client: Optional[redis_lib.Redis] = None
 
 
 def get_redis_client() -> redis_lib.Redis:
-    """Return the shared Redis client, creating it on first call.
-
-    The client does not connect until the first command is issued,
-    so this function is safe to call even if Redis is temporarily unavailable.
-    """
+    # redis.from_url is lazy — no actual TCP connect until first command
     global _redis_client
     if _redis_client is None:
         _redis_client = redis_lib.Redis.from_url(
@@ -22,7 +18,6 @@ def get_redis_client() -> redis_lib.Redis:
     return _redis_client
 
 
-def reset_redis_client() -> None:
-    """Clear the singleton — intended for use in tests only."""
+def reset_redis_client() -> None:  # test helper only
     global _redis_client
     _redis_client = None

@@ -9,7 +9,6 @@ _chroma_client: Optional[chromadb.HttpClient] = None
 
 
 def get_chroma_client() -> chromadb.HttpClient:
-    """Return the shared ChromaDB HTTP client, creating it on first call."""
     global _chroma_client
     if _chroma_client is None:
         _chroma_client = chromadb.HttpClient(
@@ -20,7 +19,6 @@ def get_chroma_client() -> chromadb.HttpClient:
 
 
 def get_child_chunks_collection() -> Collection:
-    """Return the child_chunks collection, creating it if it does not exist."""
     client = get_chroma_client()
     return client.get_or_create_collection(
         name=settings.chroma_collection_child_chunks,
@@ -29,7 +27,6 @@ def get_child_chunks_collection() -> Collection:
 
 
 def get_document_summaries_collection() -> Collection:
-    """Return the document_summaries collection, creating it if it does not exist."""
     client = get_chroma_client()
     return client.get_or_create_collection(
         name=settings.chroma_collection_summaries,
@@ -37,7 +34,6 @@ def get_document_summaries_collection() -> Collection:
     )
 
 
-def reset_chroma_client() -> None:
-    """Clear the singleton — intended for use in tests only."""
+def reset_chroma_client() -> None:  # test helper only
     global _chroma_client
     _chroma_client = None
