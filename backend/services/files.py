@@ -1,19 +1,20 @@
+import shutil
 from pathlib import Path
 from uuid import uuid4
-import shutil
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from core.dependencies import get_db
 from models.file_model import FileRecord
+from models.ingestion import IngestionJob
+from tasks.ingestion_tasks import run_ingestion
 
 
 UPLOAD_DIR = Path(__file__).resolve().parents[4] / "files"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def upload_files(file ,db ,current_user ,description):
+def upload_files(file, db: Session, current_user, description):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
 
@@ -30,17 +31,25 @@ def upload_files(file ,db ,current_user ,description):
         file_type=file.content_type,
         filesize=saved_path.stat().st_size,
         description=description,
+        ingestion_status=IngestionJob.STATUS_QUEUED,
     )
-    
     db.add(db_record)
     db.commit()
     db.refresh(db_record)
-    
+
+    job = IngestionJob(file_id=db_record.id, status=IngestionJob.STATUS_QUEUED)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    result = run_ingestion.delay(job.id, db_record.id)
+    job.celery_task_id = result.id
+    db.commit()
+
     return db_record
-    
-    
-def delete_file(file_id ,db):
-    
+
+
+def delete_file(file_id, db: Session):
     record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
     if record is None:
         raise HTTPException(status_code=404, detail="File not found")

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -16,4 +18,15 @@ class FileRecordResponse(FileRecordBase):
     filepath: str
     filesize: int
     is_active: bool
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IngestionStatusResponse(BaseModel):
+    id: int
+    file_id: int
+    status: str
+    current_stage: int | None
+    total_stages: int
+    error_message: str | None
+    completed_at: datetime | None
     model_config = ConfigDict(from_attributes=True)
