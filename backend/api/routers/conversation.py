@@ -2,9 +2,9 @@ from pathlib import Path
 from uuid import uuid4
 import shutil
 
-from fastapi import Body,APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import Body,APIRouter, Depends, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
-
+from schema.websocket import manager
 from core.dependencies import get_db
 from models.conversation import Conversation,ConversationList
 from schema.conversation import ConversationListResponse, ConversationResponse, ConversationListBase
@@ -60,7 +60,6 @@ async def get_conversation(
 ):
     return conversation_service.get_conversations(chat_list_id, db)
     
-
 @router.delete("/delete_list/{list_id}")
 async def delete_conversation_list(
     list_id:int,
@@ -68,3 +67,27 @@ async def delete_conversation_list(
     db:Session=Depends(get_db)
 ):
     return conversation_service.delete_conversation_list(list_id, db)
+
+
+##################################################################################################################
+
+@router.websocket("/chat/{tunnel_id}/{user_id}")
+async def websocket_chat_endpoint(websocket: WebSocket, tunnel_id: str, user_id: str):
+    await manager.connect(websocket, tunnel_id)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            
+            # Streaming simulation: breaking the text into chunks for slow UI updates
+            chunk_size = 5
+            for i in range(0, len(data), chunk_size):
+                chunk = data[i:i + chunk_size]
+                
+                # Format: "User_Id: chunk" or a strict JSON payload
+                formatted_payload = f"{user_id}: {chunk}"
+                
+                # Stream the message to the other users in the tunnel
+                await manager.broadcast(formatted_payload, tunnel_id, sender=websocket)
+                
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, tunnel_id)

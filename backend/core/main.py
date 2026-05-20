@@ -15,10 +15,6 @@ from starlette.middleware.sessions import SessionMiddleware
 #import uvicorn
 #from google.oauth2 import id_token
 #from google.auth.transport import requests
-#
-
-auth.Base.metadata.create_all(bind=engine)
-file_model.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
