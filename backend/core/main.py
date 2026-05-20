@@ -7,6 +7,7 @@ from core.database import engine
 from sqladmin import Admin
 from models import auth, file_model
 from api.router import api_router
+from core.config import settings
 from .admin import UserAdmin
 #from fastapi.middleware.cors import CORSMiddleware
 #from starlette.requests import Request
@@ -21,7 +22,7 @@ file_model.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-app.add_middleware(SessionMiddleware ,secret_key='secret-key')
+app.add_middleware(SessionMiddleware ,secret_key=settings.secret_key, session_cookie="session",same_site="lax",https_only=False)
 
 app.add_middleware(
     CORSMiddleware,
