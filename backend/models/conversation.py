@@ -10,7 +10,7 @@ class Conversation(Base):
     chat_id = Column(Integer, ForeignKey("conversationlist.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime(timezone=False), server_default=func.now(), nullable=False)
     user_type= Column("user_type", String(50), nullable=False)
-    statement= Column("statement", String(50), nullable=False)
+    statement= Column("statement", Text(), nullable=False)
     
     
 class ConversationList(Base):

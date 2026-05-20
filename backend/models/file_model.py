@@ -25,3 +25,4 @@ class FileRecord(Base):
     ingestion_status = Column(String(30), nullable=True)
     language = Column(String(10), nullable=True)
     total_pages = Column(Integer, nullable=True)
+    embedding_model = Column(String(100), nullable=True)

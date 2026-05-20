@@ -1,15 +1,15 @@
 """
-Celery pipeline that processes an uploaded document through 6 stages:
-parse → hash/dedup → parent chunks → child chunks → embed → summarize.
+Celery pipeline: parse → hash/dedup → parent chunks → child chunks → embed → summarize.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 try:
     from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -25,7 +25,7 @@ except ImportError:
 from sqlalchemy.orm import Session
 
 from core.celery_app import celery_app
-from core.chroma import get_child_chunks_collection, get_document_summaries_collection
+from core.chroma import get_child_chunks_collection, get_document_summaries_collection, get_propositions_collection
 from core.config import settings
 from core.database import SessionLocal
 from models.file_model import FileRecord
@@ -34,6 +34,28 @@ from models.ingestion import DocumentParent, IngestionJob
 logger = logging.getLogger(__name__)
 
 FILES_DIR = Path(__file__).resolve().parents[2] / "files"
+
+_TABULAR_MIMES = {
+    "text/csv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+}
+
+
+@dataclasses.dataclass
+class ParsedElement:
+    text: str
+    page_number: int
+    element_type: str
+
+
+@dataclasses.dataclass
+class ParentChunk:
+    text: str
+    chunk_index: int
+    page_start: int
+    page_end: int
+    element_types: str  # comma-separated, e.g. "NarrativeText,Table"
 
 
 # status helpers
@@ -72,25 +94,69 @@ def _fail_retryable(job: IngestionJob, db: Session, message: str, error_type: st
 
 # stage implementations
 
-def _stage_parse(file_path: Path, content_type: str | None) -> tuple[str, int, list[str]]:
+def _parse_tabular(file_path: Path, content_type: str) -> list[ParsedElement]:
+    import pandas as pd
+
+    try:
+        if content_type == "text/csv":
+            frames: dict[str, Any] = {"data": pd.read_csv(file_path)}
+        else:
+            raw = pd.read_excel(file_path, sheet_name=None)
+            frames = raw if isinstance(raw, dict) else {"Sheet1": raw}
+    except pd.errors.ParserError as exc:
+        raise ValueError(f"malformed CSV/XLSX: {exc}") from exc
+    except Exception as exc:
+        raise ValueError(f"could not open tabular file: {exc}") from exc
+
+    result: list[ParsedElement] = []
+    rows_per_chunk = 50
+    for frame in frames.values():
+        frame = frame.dropna(how="all")
+        if frame.empty:
+            continue
+        for row_start in range(0, len(frame), rows_per_chunk):
+            chunk_df = frame.iloc[row_start: row_start + rows_per_chunk]
+            try:
+                text = chunk_df.to_markdown(index=False)
+            except Exception:
+                text = chunk_df.to_string(index=False)
+            result.append(ParsedElement(text=text, page_number=1, element_type="Table"))
+
+    if not result:
+        raise ValueError("tabular file contains no data rows")
+    return result
+
+
+def _stage_parse(file_path: Path, content_type: str | None) -> list[ParsedElement]:
+    if content_type in _TABULAR_MIMES:
+        return _parse_tabular(file_path, content_type or "")
+
+    encoding_hint: str | None = None
+    if content_type == "text/plain":
+        import chardet
+        raw_bytes = file_path.read_bytes()[:10240]
+        detected = chardet.detect(raw_bytes)
+        if (detected.get("confidence") or 0) >= 0.7:
+            encoding_hint = detected.get("encoding")
+        else:
+            logger.warning("low chardet confidence for %s (%s); using UTF-8", file_path.name, detected)
+            encoding_hint = "utf-8"
+
     from unstructured.partition.auto import partition  # lazy import — needs tesseract/libmagic at runtime
+    kwargs: dict[str, Any] = {}
+    if encoding_hint:
+        kwargs["encoding"] = encoding_hint
+    elements = partition(filename=str(file_path), **kwargs)
 
-    elements = partition(filename=str(file_path))
-
-    element_types: list[str] = list({
-        getattr(el, "category", type(el).__name__)
-        for el in elements
-    })
-
-    page_count = max(
-        (getattr(el.metadata, "page_number", None) or 1 for el in elements),
-        default=1,
-    )
-
-    raw_text = "\n\n".join(
-        el.text for el in elements if getattr(el, "text", "").strip()
-    )
-    return raw_text, page_count, element_types
+    result: list[ParsedElement] = []
+    for el in elements:
+        text = getattr(el, "text", "").strip()
+        if not text:
+            continue
+        page_num = getattr(el.metadata, "page_number", None) or 1
+        category = getattr(el, "category", type(el).__name__)
+        result.append(ParsedElement(text=text, page_number=page_num, element_type=category))
+    return result
 
 
 def _stage_hash(file_path: Path) -> str:
@@ -102,28 +168,116 @@ def _stage_hash(file_path: Path) -> str:
     return sha.hexdigest()
 
 
-def _stage_parent_chunk(raw_text: str) -> list[str]:
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=settings.parent_chunk_size,
-        chunk_overlap=settings.parent_chunk_overlap,
-        separators=["\n\n", "\n", ".", " ", ""],
-    )
-    return splitter.split_text(raw_text)
+def _stage_parent_chunk(parsed_elements: list[ParsedElement]) -> list[ParentChunk]:
+    if settings.use_semantic_chunker and OpenAIEmbeddings is not None:
+        from langchain_experimental.text_splitter import SemanticChunker
+        splitter: Any = SemanticChunker(
+            embeddings=OpenAIEmbeddings(
+                model=settings.openai_embedding_model,
+                api_key=settings.openai_api_key,
+            ),
+            breakpoint_threshold_type="percentile",
+        )
+    else:
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=settings.parent_chunk_size,
+            chunk_overlap=settings.parent_chunk_overlap,
+            separators=["\n\n", "\n", ".", " ", ""],
+        )
+
+    parent_chunks: list[ParentChunk] = []
+    chunk_index = 0
+    i = 0
+
+    while i < len(parsed_elements):
+        el = parsed_elements[i]
+
+        if el.element_type == "Table":
+            # tables are atomic — never split across chunk boundaries
+            if len(el.text) > settings.parent_chunk_size:
+                logger.warning(
+                    "table at page %d is %d chars (limit %d); keeping as single oversized chunk",
+                    el.page_number, len(el.text), settings.parent_chunk_size,
+                )
+            parent_chunks.append(ParentChunk(
+                text=el.text,
+                chunk_index=chunk_index,
+                page_start=el.page_number,
+                page_end=el.page_number,
+                element_types="Table",
+            ))
+            chunk_index += 1
+            i += 1
+        else:
+            # collect contiguous non-table elements and split them together
+            run: list[ParsedElement] = []
+            while i < len(parsed_elements) and parsed_elements[i].element_type != "Table":
+                run.append(parsed_elements[i])
+                i += 1
+
+            # track per-element char offsets so we can map each chunk back to page numbers
+            parts: list[str] = []
+            element_spans: list[tuple[int, int, int, str]] = []  # (start, end, page_num, etype)
+            pos = 0
+            for e in run:
+                parts.append(e.text)
+                element_spans.append((pos, pos + len(e.text), e.page_number, e.element_type))
+                pos += len(e.text) + 2  # +2 for the "\n\n" separator
+
+            raw_text = "\n\n".join(parts)
+            chunk_texts = splitter.split_text(raw_text)
+
+            search_start = 0
+            for chunk_text in chunk_texts:
+                chunk_pos = raw_text.find(chunk_text, search_start)
+                if chunk_pos == -1:
+                    chunk_pos = search_start
+                chunk_end = chunk_pos + len(chunk_text)
+                search_start = chunk_pos + 1
+
+                pages: list[int] = []
+                etypes: list[str] = []
+                seen: set[str] = set()
+                for span_start, span_end, page_num, etype in element_spans:
+                    if span_start < chunk_end and span_end > chunk_pos:
+                        pages.append(page_num)
+                        if etype not in seen:
+                            etypes.append(etype)
+                            seen.add(etype)
+
+                parent_chunks.append(ParentChunk(
+                    text=chunk_text,
+                    chunk_index=chunk_index,
+                    page_start=min(pages) if pages else 1,
+                    page_end=max(pages) if pages else 1,
+                    element_types=",".join(etypes),
+                ))
+                chunk_index += 1
+
+    return parent_chunks
 
 
-def _stage_child_chunk(parent_texts: list[str]) -> list[tuple[str, list[str]]]:
+def _stage_child_chunk(parent_chunks: list[ParentChunk]) -> Iterator[tuple[ParentChunk, list[str]]]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.child_chunk_size,
         chunk_overlap=settings.child_chunk_overlap,
         separators=["\n\n", "\n", ".", " ", ""],
     )
-    return [(parent, splitter.split_text(parent)) for parent in parent_texts]
+    for parent in parent_chunks:
+        if parent.element_types == "Table":
+            yield parent, [parent.text]  # tables must not be split further
+        else:
+            yield parent, splitter.split_text(parent.text)
 
 
 def _stage_embed_upsert(
     file_id: int,
+    user_id: int,
     file_hash: str,
-    parents_with_children: list[tuple[str, list[str]]],
+    filename: str,
+    file_type: str,
+    language: str,
+    parents_with_children: Iterator[tuple[ParentChunk, list[str]]],
     db: Session,
 ) -> None:
     embedder = OpenAIEmbeddings(
@@ -132,47 +286,77 @@ def _stage_embed_upsert(
     )
     collection = get_child_chunks_collection()
 
-    for chunk_index, (parent_text, children) in enumerate(parents_with_children):
-        parent_id = hashlib.sha256(f"{file_hash}:{chunk_index}".encode()).hexdigest()
+    for parent, children in parents_with_children:
+        parent_id = hashlib.sha256(f"{file_hash}:{parent.chunk_index}".encode()).hexdigest()
+
+        # resume from last uncommitted parent on retry
+        existing = (
+            db.query(DocumentParent)
+            .filter(DocumentParent.id == parent_id)
+            .first()
+        )
+        if existing is not None and existing.is_committed:
+            continue
 
         db.merge(DocumentParent(
             id=parent_id,
             file_id=file_id,
-            content=parent_text,
-            chunk_index=chunk_index,
+            content=parent.text,
+            chunk_index=parent.chunk_index,
+            page_start=parent.page_start,
+            page_end=parent.page_end,
+            element_types=parent.element_types.split(",") if parent.element_types else [],
+            embedding_model=settings.openai_embedding_model,
+            is_committed=False,
         ))
+        db.flush()
 
-        if not children:
-            continue
+        if children:
+            child_ids = [f"{parent_id}:{i}" for i in range(len(children))]
+            child_metas = [
+                {
+                    "file_id": file_id,
+                    "user_id": user_id,
+                    "parent_id": parent_id,
+                    "child_index": i,
+                    "chunk_index": parent.chunk_index,
+                    "page_start": parent.page_start,
+                    "page_end": parent.page_end,
+                    "element_types": parent.element_types,
+                    "file_hash": file_hash,
+                    "filename": filename,
+                    "file_type": file_type or "",
+                    "language": language,
+                }
+                for i in range(len(children))
+            ]
 
-        child_ids = [f"{parent_id}:{i}" for i in range(len(children))]
-        child_metas = [
-            {
-                "file_id": file_id,
-                "parent_id": parent_id,
-                "child_index": i,
-                "chunk_index": chunk_index,
-            }
-            for i in range(len(children))
-        ]
+            for batch_start in range(0, len(children), settings.embedding_batch_size):
+                batch_texts = children[batch_start: batch_start + settings.embedding_batch_size]
+                batch_ids = child_ids[batch_start: batch_start + settings.embedding_batch_size]
+                batch_metas = child_metas[batch_start: batch_start + settings.embedding_batch_size]
 
-        for batch_start in range(0, len(children), settings.embedding_batch_size):
-            batch_texts = children[batch_start: batch_start + settings.embedding_batch_size]
-            batch_ids = child_ids[batch_start: batch_start + settings.embedding_batch_size]
-            batch_metas = child_metas[batch_start: batch_start + settings.embedding_batch_size]
+                embeddings = embedder.embed_documents(batch_texts)
+                collection.upsert(
+                    ids=batch_ids,
+                    documents=batch_texts,
+                    embeddings=embeddings,
+                    metadatas=batch_metas,
+                )
 
-            embeddings = embedder.embed_documents(batch_texts)
-            collection.upsert(
-                ids=batch_ids,
-                documents=batch_texts,
-                embeddings=embeddings,
-                metadatas=batch_metas,
-            )
-
-    db.commit()
+        # chroma write done — safe to mark committed
+        db.query(DocumentParent).filter(DocumentParent.id == parent_id).update({"is_committed": True})
+        db.commit()
 
 
-def _stage_summarize(file_id: int, file_hash: str, raw_text: str) -> None:
+def _stage_summarize(
+    file_id: int,
+    user_id: int,
+    file_hash: str,
+    filename: str,
+    language: str,
+    raw_text: str,
+) -> None:
     llm = ChatOpenAI(
         model=settings.openai_chat_model,
         temperature=settings.llm_summary_temperature,
@@ -183,14 +367,38 @@ def _stage_summarize(file_id: int, file_hash: str, raw_text: str) -> None:
         api_key=settings.openai_api_key,
     )
 
-    messages = [
-        SystemMessage(content=(
-            "You are a research assistant. Summarize the following document in 3-5 sentences, "
-            "covering the main topic, key findings, and intended audience."
-        )),
-        HumanMessage(content=raw_text[:12_000]),
-    ]
-    summary: str = llm.invoke(messages).content
+    if len(raw_text) <= settings.summary_short_doc_threshold:
+        messages = [
+            SystemMessage(content=(
+                "You are a research assistant. Summarize the following document in 3-5 sentences, "
+                "covering the main topic, key findings, and intended audience."
+            )),
+            HumanMessage(content=raw_text),
+        ]
+        summary: str = llm.invoke(messages).content
+    else:
+        # map: one summary per window
+        windows = [
+            raw_text[i: i + settings.summary_window_size]
+            for i in range(0, len(raw_text), settings.summary_window_size)
+        ]
+        section_summaries: list[str] = []
+        for window in windows:
+            msg = [
+                SystemMessage(content="Summarize this section in 2 sentences."),
+                HumanMessage(content=window),
+            ]
+            section_summaries.append(llm.invoke(msg).content)
+        # reduce: stitch section summaries into one
+        combined = "\n\n".join(section_summaries)
+        reduce_msgs = [
+            SystemMessage(content=(
+                "Combine these section summaries into a single 3-5 sentence summary of the full document, "
+                "covering the main topic, key findings, and intended audience."
+            )),
+            HumanMessage(content=combined),
+        ]
+        summary = llm.invoke(reduce_msgs).content
 
     embedding = embedder.embed_documents([summary])[0]
     collection = get_document_summaries_collection()
@@ -198,8 +406,76 @@ def _stage_summarize(file_id: int, file_hash: str, raw_text: str) -> None:
         ids=[f"summary:{file_hash}"],
         documents=[summary],
         embeddings=[embedding],
-        metadatas=[{"file_id": file_id, "file_hash": file_hash}],
+        metadatas=[{
+            "file_id": file_id,
+            "user_id": user_id,
+            "file_hash": file_hash,
+            "filename": filename,
+            "language": language,
+        }],
     )
+
+
+def _stage_extract_propositions(
+    file_id: int,
+    user_id: int,
+    file_hash: str,
+    filename: str,
+    language: str,
+    db: Session,
+) -> None:
+    llm = ChatOpenAI(
+        model=settings.openai_chat_model,
+        temperature=0.0,
+        api_key=settings.openai_api_key,
+    )
+    embedder = OpenAIEmbeddings(
+        model=settings.openai_embedding_model,
+        api_key=settings.openai_api_key,
+    )
+    collection = get_propositions_collection()
+    parents = db.query(DocumentParent).filter(DocumentParent.file_id == file_id).all()
+
+    for parent in parents:
+        messages = [
+            SystemMessage(content=(
+                "Extract every distinct factual statement from the text below as a numbered list. "
+                "Each item must be a single self-contained sentence. "
+                "Do not include vague or subjective claims. One proposition per line."
+            )),
+            HumanMessage(content=parent.content),
+        ]
+        raw: str = llm.invoke(messages).content
+        # strip numbering/bullets from each line
+        propositions = [
+            line.strip().lstrip("0123456789.) -•")
+            for line in raw.splitlines()
+            if line.strip()
+        ]
+        propositions = [p for p in propositions if p]
+        if not propositions:
+            continue
+
+        prop_ids = [f"prop:{parent.id}:{i}" for i in range(len(propositions))]
+        prop_metas = [
+            {
+                "file_id": file_id,
+                "user_id": user_id,
+                "parent_id": parent.id,
+                "prop_index": i,
+                "file_hash": file_hash,
+                "filename": filename,
+                "language": language,
+            }
+            for i in range(len(propositions))
+        ]
+
+        for batch_start in range(0, len(propositions), settings.embedding_batch_size):
+            batch_texts = propositions[batch_start: batch_start + settings.embedding_batch_size]
+            batch_ids = prop_ids[batch_start: batch_start + settings.embedding_batch_size]
+            batch_metas = prop_metas[batch_start: batch_start + settings.embedding_batch_size]
+            embeddings = embedder.embed_documents(batch_texts)
+            collection.upsert(ids=batch_ids, documents=batch_texts, embeddings=embeddings, metadatas=batch_metas)
 
 
 # Celery task
@@ -230,10 +506,29 @@ def run_ingestion(self, job_id: int, file_id: int) -> dict[str, Any]:
             _fail_permanent(job, db, f"File not on disk: {file_path}", "FileNotFoundError")
             return {"status": "FAILED_PERMANENT", "reason": "file_missing_on_disk"}
 
-        raw_text, page_count, element_types = _stage_parse(file_path, file_record.file_type)
+        parsed_elements = _stage_parse(file_path, file_record.file_type)
+        raw_text = "\n\n".join(el.text for el in parsed_elements)
+        page_count = max((el.page_number for el in parsed_elements), default=1)
         job.total_pages = page_count
         file_record.total_pages = page_count
         db.commit()
+
+        # scanned / image-only PDFs yield almost no text — skip them early
+        file_size = file_path.stat().st_size
+        text_density = len(raw_text.strip()) / max(file_size, 1)
+        if (
+            file_size >= settings.scanned_pdf_min_file_size_bytes
+            and text_density < settings.scanned_pdf_text_density_threshold
+        ):
+            _fail_permanent(
+                job, db,
+                "Document appears to be scanned or contains no extractable text. "
+                "OCR support is not currently available.",
+                "LIKELY_SCANNED_PDF",
+            )
+            file_record.ingestion_status = IngestionJob.STATUS_FAILED_PERMANENT
+            db.commit()
+            return {"status": "FAILED_PERMANENT", "reason": "likely_scanned_pdf"}
 
         # Stage 2 — Hash / dedup
         _set_stage(job, db, 2)
@@ -241,36 +536,88 @@ def run_ingestion(self, job_id: int, file_id: int) -> dict[str, Any]:
         job.file_hash = file_hash
         job.file_size_bytes = file_path.stat().st_size
         file_record.file_hash = file_hash
+
+        try:
+            from langdetect import detect
+            language: str = detect(raw_text[:2000])
+        except Exception:
+            language = "unknown"
+        file_record.language = language
         db.commit()
 
-        existing = db.query(DocumentParent).filter(DocumentParent.file_id == file_id).first()
-        if existing is not None:
+        # same content uploaded again under a different name — skip re-embedding
+        duplicate = (
+            db.query(FileRecord)
+            .filter(
+                FileRecord.user_id == file_record.user_id,
+                FileRecord.file_hash == file_hash,
+                FileRecord.id != file_id,
+                FileRecord.ingestion_status == IngestionJob.STATUS_COMPLETE,
+            )
+            .first()
+        )
+        if duplicate is not None:
+            logger.info(
+                "File %s is a duplicate of file %s (hash %s); skipping ingestion.",
+                file_id, duplicate.id, file_hash,
+            )
             _complete(job, db, file_hash)
             file_record.ingestion_status = IngestionJob.STATUS_COMPLETE
             db.commit()
-            return {"status": "COMPLETE", "deduped": True}
+            return {"status": "COMPLETE", "deduped": True, "original_file_id": duplicate.id}
 
         # Stage 3 — Parent chunks
         _set_stage(job, db, 3)
-        parent_texts = _stage_parent_chunk(raw_text)
+        parent_chunks = _stage_parent_chunk(parsed_elements)
 
         # Stage 4 — Child chunks
         _set_stage(job, db, 4)
-        parents_with_children = _stage_child_chunk(parent_texts)
+        children_gen = _stage_child_chunk(parent_chunks)
 
         # Stage 5 — Embed + upsert
         _set_stage(job, db, 5)
-        _stage_embed_upsert(file_id, file_hash, parents_with_children, db)
+        _stage_embed_upsert(
+            file_id=file_id,
+            user_id=file_record.user_id,
+            file_hash=file_hash,
+            filename=file_record.filename,
+            file_type=file_record.file_type or "",
+            language=language,
+            parents_with_children=children_gen,
+            db=db,
+        )
 
         # Stage 6 — Summary
         _set_stage(job, db, 6)
-        _stage_summarize(file_id, file_hash, raw_text)
+        _stage_summarize(
+            file_id=file_id,
+            user_id=file_record.user_id,
+            file_hash=file_hash,
+            filename=file_record.filename,
+            language=language,
+            raw_text=raw_text,
+        )
+
+        # optional proposition extraction — runs silently, doesn't affect job status
+        if settings.use_proposition_extraction:
+            try:
+                _stage_extract_propositions(
+                    file_id=file_id,
+                    user_id=file_record.user_id,
+                    file_hash=file_hash,
+                    filename=file_record.filename,
+                    language=language,
+                    db=db,
+                )
+            except Exception:
+                logger.exception("proposition extraction failed for job %s — continuing", job_id)
 
         _complete(job, db, file_hash)
         file_record.ingestion_status = IngestionJob.STATUS_COMPLETE
+        file_record.embedding_model = settings.openai_embedding_model
         db.commit()
 
-        return {"status": "COMPLETE", "job_id": job_id, "chunks": len(parent_texts)}
+        return {"status": "COMPLETE", "job_id": job_id, "chunks": len(parent_chunks)}
 
     except Exception as exc:
         logger.exception(

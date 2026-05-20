@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY
 
 from core.database import Base
@@ -14,6 +14,8 @@ class DocumentParent(Base):
     page_end = Column(Integer, nullable=True)
     element_types = Column(ARRAY(Text), nullable=True)
     chunk_index = Column(Integer, nullable=False)
+    is_committed = Column(Boolean, nullable=False, default=False)
+    embedding_model = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
