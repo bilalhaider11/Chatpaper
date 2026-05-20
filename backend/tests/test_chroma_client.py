@@ -180,3 +180,72 @@ class TestCollectionNamesAreDistinct:
             settings.chroma_collection_child_chunks
             != settings.chroma_collection_summaries
         )
+
+
+class TestGetPropositionsCollection:
+    def _mock_client(self):
+        mock_client = MagicMock()
+        mock_collection = MagicMock()
+        mock_client.get_or_create_collection.return_value = mock_collection
+        return mock_client, mock_collection
+
+    def test_calls_get_or_create_collection_with_correct_name(self):
+        from core.chroma import get_propositions_collection
+        mock_client, _ = self._mock_client()
+        with patch("core.chroma.get_chroma_client", return_value=mock_client):
+            get_propositions_collection()
+            _, kwargs = mock_client.get_or_create_collection.call_args
+            assert kwargs.get("name") == settings.chroma_collection_propositions
+
+    def test_uses_cosine_distance_metric(self):
+        from core.chroma import get_propositions_collection
+        mock_client, _ = self._mock_client()
+        with patch("core.chroma.get_chroma_client", return_value=mock_client):
+            get_propositions_collection()
+            _, kwargs = mock_client.get_or_create_collection.call_args
+            assert kwargs.get("metadata", {}).get("hnsw:space") == "cosine"
+
+    def test_returns_collection_object(self):
+        from core.chroma import get_propositions_collection
+        mock_client, mock_collection = self._mock_client()
+        with patch("core.chroma.get_chroma_client", return_value=mock_client):
+            assert get_propositions_collection() is mock_collection
+
+    def test_propositions_name_distinct_from_child_chunks(self):
+        assert settings.chroma_collection_propositions != settings.chroma_collection_child_chunks
+
+    def test_propositions_name_distinct_from_summaries(self):
+        assert settings.chroma_collection_propositions != settings.chroma_collection_summaries
+
+
+class TestDeleteVectorsForFile:
+    def _mock_collections(self):
+        child = MagicMock()
+        summaries = MagicMock()
+        propositions = MagicMock()
+        return child, summaries, propositions
+
+    def test_deletes_from_all_three_collections(self):
+        from core.chroma import delete_vectors_for_file
+        child, summaries, props = self._mock_collections()
+        with (
+            patch("core.chroma.get_child_chunks_collection", return_value=child),
+            patch("core.chroma.get_document_summaries_collection", return_value=summaries),
+            patch("core.chroma.get_propositions_collection", return_value=props),
+        ):
+            delete_vectors_for_file(99)
+        child.delete.assert_called_once_with(where={"file_id": 99})
+        summaries.delete.assert_called_once_with(where={"file_id": 99})
+        props.delete.assert_called_once_with(where={"file_id": 99})
+
+    def test_delete_filter_uses_correct_file_id(self):
+        from core.chroma import delete_vectors_for_file
+        child, summaries, props = self._mock_collections()
+        with (
+            patch("core.chroma.get_child_chunks_collection", return_value=child),
+            patch("core.chroma.get_document_summaries_collection", return_value=summaries),
+            patch("core.chroma.get_propositions_collection", return_value=props),
+        ):
+            delete_vectors_for_file(7)
+        for col in (child, summaries, props):
+            assert col.delete.call_args.kwargs["where"] == {"file_id": 7}

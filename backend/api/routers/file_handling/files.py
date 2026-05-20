@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from core.auth import get_current_user
 from core.config import settings
 from core.dependencies import get_db
+from models.auth import UserRole
 from models.file_model import FileRecord
 from models.ingestion import IngestionJob
 from schema.file import FileRecordResponse, FileRecordUpdate, IngestionStatusResponse
@@ -25,7 +26,6 @@ async def upload_file(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    # Reject unsupported file types before reading any content.
     if file.content_type not in settings.allowed_mime_types:
         raise HTTPException(
             status_code=415,
@@ -35,12 +35,11 @@ async def upload_file(
             ),
         )
 
-    # Check file size without loading the whole file into memory.
-    # UploadFile exposes the underlying SpooledTemporaryFile; seek to end to measure.
+    # seek to end — tell() gives size without loading the whole file into memory
     await file.seek(0)
-    file.file.seek(0, 2)  # seek to end
+    file.file.seek(0, 2)
     file_size = file.file.tell()
-    file.file.seek(0)     # reset for subsequent reads
+    file.file.seek(0)
 
     if file_size > _MAX_BYTES:
         raise HTTPException(
@@ -55,17 +54,26 @@ async def upload_file(
 @router.get("/", response_model=list[FileRecordResponse])
 async def list_files(
     db: Session = Depends(get_db),
-    _current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
-    return db.query(FileRecord).order_by(FileRecord.id.desc()).all()
+    q = db.query(FileRecord).order_by(FileRecord.id.desc())
+    if current_user.role != UserRole.admin:
+        q = q.filter(FileRecord.user_id == current_user.id)
+    return q.all()
 
 
 @router.get("/{file_id}/ingestion-status", response_model=IngestionStatusResponse)
 async def get_ingestion_status(
     file_id: int,
     db: Session = Depends(get_db),
-    _current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
+    record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
+    if record is None or (
+        current_user.role != UserRole.admin and record.user_id != current_user.id
+    ):
+        raise HTTPException(status_code=404, detail="File not found")
+
     job = (
         db.query(IngestionJob)
         .filter(IngestionJob.file_id == file_id)
@@ -81,6 +89,7 @@ async def get_ingestion_status(
 async def delete_file(
     file_id: int,
     db: Session = Depends(get_db),
-    _current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
-    return files.delete_file(file_id, db)
+    owner_id = None if current_user.role == UserRole.admin else current_user.id
+    return files.delete_file(file_id, owner_id, db)

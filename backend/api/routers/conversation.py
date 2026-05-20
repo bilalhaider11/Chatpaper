@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from core.dependencies import get_db
-from models.conversation import Conversation,ConversationList
+from models.auth import UserRole
+from models.conversation import Conversation, ConversationList
 from schema.conversation import ConversationListResponse, ConversationResponse, ConversationListBase
 from core.auth import get_current_user
 from services import conversation as conversation_service
@@ -32,30 +33,42 @@ async def update_conversation_title(
 ):
     return conversation_service.update_conversation_title(title ,conversation_id, db)
 
-@router.get("/get_conversation_list",response_model=list[ConversationListResponse])
+@router.get("/get_conversation_list", response_model=list[ConversationListResponse])
 async def get_conersation_list(
     current_user=Depends(get_current_user),
-    db: Session=Depends(get_db)):
- 
-    
-    return db.query(ConversationList).where(ConversationList.user_id == current_user.id , ConversationList.is_active == True).all()
+    db: Session = Depends(get_db),
+):
+    q = db.query(ConversationList).where(ConversationList.is_active == True)
+    if current_user.role != UserRole.admin:
+        q = q.where(ConversationList.user_id == current_user.id)
+    return q.all()
     
 
-@router.post("/conversation/{chat_id}",response_model=ConversationResponse)
+@router.post("/conversation/{chat_id}", response_model=ConversationResponse)
 async def conversation(
-    chat_id:int,
+    chat_id: int,
     data: ConversationResponse,
     current_user=Depends(get_current_user),
-    db: Session=Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    
+    convo_list = db.query(ConversationList).filter(ConversationList.id == chat_id).first()
+    if convo_list is None or (
+        current_user.role != UserRole.admin and convo_list.user_id != current_user.id
+    ):
+        raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation_service.add_conversation(data, chat_id, db)
 
 
-@router.get("/get-conversation/{chat_list_id}",response_model=list[ConversationResponse])
+@router.get("/get-conversation/{chat_list_id}", response_model=list[ConversationResponse])
 async def get_conversation(
-    chat_list_id:int,
-    db: Session=Depends(get_db)
+    chat_list_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
+    convo_list = db.query(ConversationList).filter(ConversationList.id == chat_list_id).first()
+    if convo_list is None or (
+        current_user.role != UserRole.admin and convo_list.user_id != current_user.id
+    ):
+        raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation_service.get_conversations(chat_list_id, db)
     

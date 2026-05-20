@@ -507,6 +507,17 @@ def run_ingestion(self, job_id: int, file_id: int) -> dict[str, Any]:
             return {"status": "FAILED_PERMANENT", "reason": "file_missing_on_disk"}
 
         parsed_elements = _stage_parse(file_path, file_record.file_type)
+
+        if not parsed_elements:
+            _fail_permanent(
+                job, db,
+                "No text content could be extracted from this document.",
+                "EMPTY_DOCUMENT",
+            )
+            file_record.ingestion_status = IngestionJob.STATUS_FAILED_PERMANENT
+            db.commit()
+            return {"status": "FAILED_PERMANENT", "reason": "empty_document"}
+
         raw_text = "\n\n".join(el.text for el in parsed_elements)
         page_count = max((el.page_number for el in parsed_elements), default=1)
         job.total_pages = page_count
@@ -630,8 +641,14 @@ def run_ingestion(self, job_id: int, file_id: int) -> dict[str, Any]:
             if job_fresh:
                 if self.request.retries < self.max_retries:
                     _fail_retryable(job_fresh, db, str(exc), type(exc).__name__)
+                    new_status = IngestionJob.STATUS_FAILED_RETRYABLE
                 else:
                     _fail_permanent(job_fresh, db, str(exc), type(exc).__name__)
+                    new_status = IngestionJob.STATUS_FAILED_PERMANENT
+                file_fresh = db.query(FileRecord).filter(FileRecord.id == file_id).first()
+                if file_fresh:
+                    file_fresh.ingestion_status = new_status
+                    db.commit()
         except Exception:
             logger.exception("Could not update job status after failure for job %s", job_id)
 

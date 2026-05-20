@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from core.auth import get_current_user
 from core.config import settings
 from core.dependencies import get_db
+from models.auth import UserRole
 from models.conversation import Conversation, ConversationList
 from schema.chat import AskRequest, AskResponse, Citation
 from services.retrieval import RetrievedContext, retrieve
@@ -50,20 +51,17 @@ async def ask(
     if ChatOpenAI is None:
         raise HTTPException(status_code=503, detail="LLM dependencies not installed")
 
-    convo = (
-        db.query(ConversationList)
-        .filter(
-            ConversationList.id == conversation_id,
-            ConversationList.user_id == current_user.id,
-        )
-        .first()
-    )
+    q = db.query(ConversationList).filter(ConversationList.id == conversation_id)
+    if current_user.role != UserRole.admin:
+        q = q.filter(ConversationList.user_id == current_user.id)
+    convo = q.first()
     if convo is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    # use the conversation owner's id so retrieval hits the right user's vectors
     contexts = retrieve(
         query=body.question,
-        user_id=current_user.id,
+        user_id=convo.user_id,
         db=db,
         file_ids=body.file_ids,
         top_k=body.top_k,

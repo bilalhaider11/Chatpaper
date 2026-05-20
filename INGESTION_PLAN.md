@@ -1,7 +1,7 @@
 # Chatpaper — Ingestion & Vectorization Implementation Plan
 
 **Branch:** `RAG-Implementation`  
-**Last updated:** 2026-05-19  
+**Last updated:** 2026-05-20  
 **Purpose:** Authoritative reference for what is implemented, what is in progress, and what is planned. Consult this when context is lost between sessions.
 
 ---
@@ -24,12 +24,14 @@
 | FastAPI backend, auth (JWT + RBAC), file upload endpoint | Working |
 | PostgreSQL models: `users`, `files_data`, `conversationlist`, `conversation` | Working |
 | PostgreSQL models: `document_parents`, `ingestion_jobs` | Working |
-| Alembic migrations 0001–0006 | Applied |
+| Alembic migrations 0001–0009 | Applied (head) |
 | Celery + Redis task queue | Working |
-| ChromaDB HTTP client (`core/chroma.py`) with two collections | Working |
-| 6-stage ingestion Celery task (`tasks/ingestion_tasks.py`) | Working (with gaps — see below) |
+| ChromaDB HTTP client (`core/chroma.py`) with three collections | Working |
+| 6-stage ingestion Celery task (`tasks/ingestion_tasks.py`) | Working — all Phase 0/1/1.5 gaps fixed |
 | Ingestion status endpoint `GET /files/{id}/ingestion-status` | Working |
 | File delete endpoint `DELETE /files/{id}` | Working — ChromaDB vector cleanup added (Phase 0) |
+| Retrieval service (`services/retrieval.py`) | Implemented — dense + BM25 + RRF + summary routing + propositions |
+| Chat endpoint `POST /api/chat/{id}/ask` | Implemented — multi-turn, citations, context injection |
 
 ### Known Gaps in the Existing Implementation
 
@@ -411,6 +413,151 @@ application/vnd.ms-excel
 
 ---
 
+## Phase 3 — Security Fixes, Pipeline Hardening & Test Suite Overhaul
+
+**Goal:** Fix security vulnerabilities discovered during audit, close two pipeline correctness gaps, and bring the test suite into sync with the real codebase. All existing tests written against old function signatures are currently broken and will fail.
+
+**Why this phase now:** Phases 0–2 produced a functionally complete system, but the audit found three security bugs (file ownership not enforced on list/status/delete endpoints), two silent data correctness gaps (empty parse result, stale retryable status), and a test suite that can no longer run because function signatures changed during Phase 1 refactors. None of these require schema changes.
+
+**Prerequisite:** All Phase 0, 1, 1.5, and 2 items complete. Alembic at head (0009).
+
+---
+
+### P3.1 — Fix File Endpoint Ownership Checks
+**Status:** `[x]`
+**Severity:** Critical — any authenticated user can read, probe, or delete any other user's files.
+**Why:** `list_files` has no `user_id` filter — it returns every file from every user. `get_ingestion_status` and `delete_file` accept a bare `file_id` with no ownership verification — any user who knows the integer ID can probe status or delete a file they don't own.
+**Where:**
+- `backend/api/routers/file_handling/files.py` — `list_files()`: add `.filter(FileRecord.user_id == _current_user.id)`. Change `_current_user` to `current_user` so the dependency is used.
+- `backend/api/routers/file_handling/files.py` — `get_ingestion_status()`: before the job query, fetch the `FileRecord` and verify `record.user_id == current_user.id`; raise HTTP 404 if not found or not owned (do not 403 — do not reveal file existence to non-owners).
+- `backend/api/routers/file_handling/files.py` — `delete_file()`: pass `current_user.id` to `files.delete_file()`; add ownership check in `services/files.py` before deleting.
+
+**Acceptance criteria:**
+- `GET /files/` returns only the calling user's files.
+- `GET /files/{id}/ingestion-status` returns 404 for a valid file owned by a different user.
+- `DELETE /files/{id}` returns 404 for a valid file owned by a different user.
+
+---
+
+### P3.2 — Guard for Empty Parse Result
+**Status:** `[x]`
+**Severity:** High — a valid-looking file that yields no elements from `_stage_parse()` completes ingestion silently with zero vectors in ChromaDB. The job shows `COMPLETE` but nothing was indexed.
+**Why:** `unstructured` can return an empty element list for certain file types without raising an error (e.g., a PDF with only images that doesn't meet the scanned-PDF size threshold). The pipeline currently has no check after Stage 1 returns — it proceeds through all stages and writes a COMPLETE status with 0 parent chunks.
+**Where:**
+- `backend/tasks/ingestion_tasks.py` — `run_ingestion()`: after `parsed_elements = _stage_parse(...)`, check `if not parsed_elements`. If empty, call `_fail_permanent(job, db, "No text content could be extracted from this document.", "EMPTY_DOCUMENT")` and return.
+
+**Acceptance criteria:**
+- A file that parses to zero elements results in `IngestionJob.status = "FAILED_PERMANENT"` and `error_type = "EMPTY_DOCUMENT"`.
+- No vectors are written, no parent chunks are created.
+
+---
+
+### P3.3 — Sync `file_record.ingestion_status` on Retryable Failure
+**Status:** `[x]`
+**Severity:** Medium — when a transient error occurs mid-ingestion and the job is marked `FAILED_RETRYABLE`, `files_data.ingestion_status` still shows `QUEUED`. The file listing endpoint reads from `files_data`, so the UI shows incorrect status.
+**Why:** The retryable failure handler in `run_ingestion()`'s `except` block calls `_fail_retryable(job_fresh, db, ...)` which only updates `ingestion_jobs.status`. It never touches `file_record.ingestion_status`. Only the permanent failure path inside the scanned-PDF check updates the file record explicitly.
+**Where:**
+- `backend/tasks/ingestion_tasks.py` — `run_ingestion()` `except` block: after `_fail_retryable(job_fresh, ...)`, also update `file_record.ingestion_status = IngestionJob.STATUS_FAILED_RETRYABLE` and commit. On `_fail_permanent(job_fresh, ...)`, similarly update `file_record.ingestion_status = IngestionJob.STATUS_FAILED_PERMANENT`. Wrap in its own try/except since the file_record object may be detached after rollback — re-query if needed.
+
+**Acceptance criteria:**
+- After a transient ingestion failure, `files_data.ingestion_status` shows `FAILED_RETRYABLE`, not `QUEUED`.
+- After max retries are exhausted, it shows `FAILED_PERMANENT`.
+
+---
+
+### P3.4 — Fix Broken Unit Tests (Signature Drift)
+**Status:** `[x]`
+**Why:** Function signatures changed significantly during Phase 1 and Phase 1.5 refactors. The test suite was not updated in sync. Running `pytest` today will produce failures in five test classes because the tests call functions with the old argument lists.
+
+**Broken test classes and root cause:**
+
+| Class | Root cause |
+|---|---|
+| `TestStageParentChunk` | Calls `_stage_parent_chunk("some text")` (old: `str`); signature is now `list[ParsedElement]`. Asserts list of strings returned; real return is `list[ParentChunk]`. |
+| `TestStageChildChunk` | Calls `_stage_child_chunk(["parent"])` (old: `list[str]`); signature is now `list[ParentChunk]`. Asserts list returned; real function is a generator. |
+| `TestStageEmbedUpsert` | Calls `_stage_embed_upsert(1, "hash", [...], db)` (4 args); signature is now 8 args (`user_id`, `filename`, `file_type`, `language` added). |
+| `TestStageSummarize` | Calls `_stage_summarize(1, "hash", "text")` (3 args); signature is now 6 args. `test_text_truncated_to_12000_chars` tests old truncation; real code now uses map-reduce. |
+| `TestRunIngestionOrchestrator` | `_patch_happy_stages` patches `_stage_parse` to return a raw tuple; real code does `el.text for el in parsed_elements` on the return value → `AttributeError`. Dedup test uses old `DocumentParent`-based dedup; real code queries `FileRecord` by hash. |
+
+**Where:**
+- `backend/tests/test_ingestion_tasks.py` — rewrite all five broken test classes to match current signatures and return types.
+
+---
+
+### P3.5 — Add Missing Tests for Phase 1 / 1.5 Code
+**Status:** `[x]`
+**Why:** The following new functions and behaviors added in Phases 1 and 1.5 have zero test coverage. If any of these break silently, there is no safety net.
+
+**Missing coverage:**
+
+| Function / Behavior | What to test |
+|---|---|
+| `_parse_tabular()` | CSV read + 50-row chunking, XLSX multi-sheet, empty sheet skipped, malformed CSV → `ValueError`, no-data-rows → `ValueError` |
+| `_stage_parse()` chardet branch | Low confidence falls back to UTF-8 and logs warning; high confidence passes encoding to `partition()` |
+| `_stage_parse()` tabular dispatch | Routes CSV/XLSX to `_parse_tabular()` instead of `partition()` |
+| `_stage_parent_chunk()` Table atomicity | Table element emits as a single `ParentChunk` without splitting; oversized table logs warning and is still kept whole |
+| `_stage_parent_chunk()` page range mapping | Chunk `page_start`/`page_end` are derived from the elements it spans |
+| `_stage_parent_chunk()` element_types | Comma-separated unique types collected per chunk |
+| `_stage_child_chunk()` Table passthrough | Parent with `element_types == "Table"` yields child list containing only the parent text unchanged |
+| `_stage_child_chunk()` generator behavior | Function is a generator — result must be consumed, not compared to a list directly |
+| `_stage_embed_upsert()` `is_committed` skip | Existing parent row with `is_committed=True` is skipped; `is_committed=False` is processed |
+| `_stage_embed_upsert()` new metadata fields | `user_id`, `filename`, `file_type`, `language`, `page_start`, `page_end`, `element_types` present in ChromaDB metadata |
+| `_stage_summarize()` map-reduce path | Doc longer than `summary_short_doc_threshold` → multiple LLM calls (one per window + one reduce call) |
+| `_stage_extract_propositions()` | Fetches parents, calls LLM, strips numbering, batches upsert; empty propositions list → skipped without error |
+| `run_ingestion()` scanned PDF | `text_density < threshold` and `file_size > min_size` → `FAILED_PERMANENT` with `LIKELY_SCANNED_PDF` |
+| `run_ingestion()` global dedup | Second file with same `(user_id, file_hash)` → `COMPLETE` with `deduped=True`; uses `FileRecord` query not `DocumentParent` |
+
+**Where:** `backend/tests/test_ingestion_tasks.py` — add new test classes alongside the fixed broken ones.
+
+---
+
+### P3.6 — Add Tests for Retrieval Service
+**Status:** `[x]`
+**Why:** `services/retrieval.py` was introduced in Phase 2 and has zero test coverage. It contains the most complex logic in the system (RRF fusion, ChromaDB query wrapping, BM25 SQL, summary routing). Silent bugs here degrade answer quality with no observable error.
+
+**What to test:**
+
+| Function | What to test |
+|---|---|
+| `_where()` | No `file_ids` → returns `{"user_id": user_id}`; single `file_id` → `$and` with `{"file_id": N}`; multiple → `{"file_id": {"$in": [...]}}` |
+| `_chroma_query()` | Returns empty dicts on exception (does not propagate) |
+| `_dense_retrieve()` | Groups by `parent_id`, keeps best similarity per parent; `sim = 1.0 - dist` |
+| `_bm25_retrieve()` | Executes SQL, returns `{parent_id: rank}` dict; returns empty dict on DB exception |
+| `_rrf()` | Single list → scores match `1/(k+rank+1)` formula; multiple lists → parent appearing in both scores higher than one appearing in one |
+| `retrieve()` | Empty ChromaDB returns empty list; summary routing narrows `routing_file_ids`; BM25 disabled → `_bm25_retrieve` not called; top_k limits output |
+
+**Where:** `backend/tests/test_retrieval.py` — new file.
+
+---
+
+### P3.7 — Add Tests for Chat Endpoint
+**Status:** `[x]`
+**Why:** `api/routers/chat.py` is entirely untested. It is the user-facing surface of the RAG system. Bugs here mean wrong answers, broken citations, or unguarded access to other users' conversations.
+
+**What to test (all via FastAPI `TestClient`):**
+
+| Scenario | Expected |
+|---|---|
+| Valid request for own conversation | Returns `AskResponse` with `answer` and `citations` |
+| `conversation_id` belonging to another user | HTTP 404 |
+| `conversation_id` that doesn't exist | HTTP 404 |
+| Conversation history injected | Messages built in chronological order with correct `user_type` mapping |
+| `file_ids` passed in request | `retrieve()` called with those `file_ids` |
+| LLM unavailable (import guard) | HTTP 503 |
+| `Conversation` rows saved after ask | Two new rows in DB (user turn + assistant turn) |
+
+**Where:** `backend/tests/test_chat_router.py` — new file.
+
+---
+
+### P3.8 — Add Missing Chroma Client Tests
+**Status:** `[x]`
+**Why:** `get_propositions_collection()` and `delete_vectors_for_file()` were added in Phase 2 but `test_chroma_client.py` has no tests for them.
+**Where:**
+- `backend/tests/test_chroma_client.py` — add `TestGetPropositionsCollection` mirroring the existing pattern; add `TestDeleteVectorsForFile` verifying `delete()` is called on all three collections with `{"file_id": N}`.
+
+---
+
 ## Migration Checklist
 
 Migrations that need to be created in `backend/alembic/versions/`:
@@ -423,6 +570,8 @@ Migrations that need to be created in `backend/alembic/versions/`:
 | M4 | Add `embedding_model VARCHAR(100)` to `files_data` | Phase 1 | `[x]` `0008_add_is_committed_and_embedding_model.py` |
 | M5 | Add `embedding_model VARCHAR(100)` to `document_parents` | Phase 1 | `[x]` `0008_add_is_committed_and_embedding_model.py` |
 | M6 | Add GIN FTS index on `document_parents.content` | Phase 2 | `[x]` `0009_add_fts_index.py` |
+
+No new migrations needed for Phase 3.
 
 ---
 
@@ -453,6 +602,7 @@ All required dependencies are already in `requirements.txt` and installed:
 | Proposition extraction deferred to Phase 2 | LLM hallucination during extraction is a silent quality failure; requires validation tooling | Implementing in Phase 1 (risks polluting the vector space with hallucinated propositions before we can detect them) |
 | pandas for CSV/XLSX instead of unstructured | Preserves column structure; enables Markdown table serialization; headers are retained in every chunk | unstructured (destroys structure; row becomes space-separated values with no column context) |
 | PostgreSQL for parent storage (not ChromaDB) | Parent chunks are large text blobs; ChromaDB is not optimized for large document storage; PostgreSQL supports efficient `WHERE parent_id = ?` lookups | Storing parents in ChromaDB as a second collection (expensive full collection scan to retrieve one parent) |
+| 404 (not 403) for cross-user resource access | Do not reveal resource existence to non-owners — 403 confirms the resource exists | 403 Forbidden (leaks information about other users' data) |
 
 ---
 

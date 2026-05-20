@@ -76,9 +76,9 @@ def upload_files(file, db: Session, current_user, description):
     return db_record
 
 
-def delete_file(file_id, db: Session):
+def delete_file(file_id, user_id: int | None, db: Session):
     record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
-    if record is None:
+    if record is None or (user_id is not None and record.user_id != user_id):
         raise HTTPException(status_code=404, detail="File not found")
 
     # CASCADE cleans up postgres rows but chroma vectors need a manual delete
