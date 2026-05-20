@@ -10,6 +10,7 @@ from core.chroma import (
     get_child_chunks_collection,
     get_document_summaries_collection,
     reset_chroma_client,
+    reset_chroma_collections,
 )
 from core.config import settings
 
@@ -17,8 +18,10 @@ from core.config import settings
 @pytest.fixture(autouse=True)
 def clear_singleton():
     reset_chroma_client()
+    reset_chroma_collections()
     yield
     reset_chroma_client()
+    reset_chroma_collections()
 
 
 

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, computed_field
 
 
 class FileRecordBase(BaseModel):
@@ -15,10 +15,15 @@ class FileRecordUpdate(BaseModel):
 class FileRecordResponse(FileRecordBase):
     id: int
     filename: str
-    filepath: str
     filesize: int
     is_active: bool
+    ingestion_status: str | None = None
     model_config = ConfigDict(from_attributes=True)
+
+    @computed_field
+    @property
+    def download_url(self) -> str:
+        return f"/files/{self.id}/download"
 
 
 class IngestionStatusResponse(BaseModel):
@@ -28,5 +33,6 @@ class IngestionStatusResponse(BaseModel):
     current_stage: int | None
     total_stages: int
     error_message: str | None
+    error_type: str | None
     completed_at: datetime | None
     model_config = ConfigDict(from_attributes=True)

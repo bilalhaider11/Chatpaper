@@ -52,6 +52,7 @@ def _chroma_query(collection, query_embedding: list[float], where: dict, n: int)
             include=["metadatas", "distances"],
         )
     except Exception:
+        logger.exception("ChromaDB query failed")
         return {"metadatas": [[]], "distances": [[]]}
 
 
@@ -197,7 +198,11 @@ def retrieve(
         return []
 
     fused = _rrf(ranked_lists)
-    top_ids = sorted(fused, key=lambda p: fused[p], reverse=True)[:top_k]
+    min_score = settings.retrieval_min_score
+    top_ids = [
+        p for p in sorted(fused, key=lambda p: fused[p], reverse=True)
+        if fused[p] >= min_score
+    ][:top_k]
 
     rows = (
         db.query(DocumentParent, FileRecord.filename)

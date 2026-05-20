@@ -1,8 +1,10 @@
+from __future__ import annotations
+
+import os
 from typing import Optional
 
-from pydantic import BaseModel
-import os
 from dotenv import load_dotenv
+from pydantic import BaseModel, model_validator
 
 load_dotenv()
 
@@ -42,19 +44,20 @@ class Settings(BaseModel):
     embedding_batch_size: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "100"))
 
     # scanned PDF / near-empty document detection
-    # Only applied to files larger than the min size; tiny files are allowed through.
     scanned_pdf_min_file_size_bytes: int = int(os.getenv("SCANNED_PDF_MIN_FILE_SIZE_BYTES", "51200"))
     scanned_pdf_text_density_threshold: float = float(os.getenv("SCANNED_PDF_TEXT_DENSITY_THRESHOLD", "0.001"))
 
-    # short docs get one LLM call; anything longer is windowed and map-reduced
+    # summarization
     summary_short_doc_threshold: int = int(os.getenv("SUMMARY_SHORT_DOC_THRESHOLD", "12000"))
     summary_window_size: int = int(os.getenv("SUMMARY_WINDOW_SIZE", "10000"))
+    summary_extraction_concurrency: int = int(os.getenv("SUMMARY_EXTRACTION_CONCURRENCY", "5"))
 
-    # SemanticChunker uses embedding similarity for topic boundaries; disabled by default
+    # SemanticChunker
     use_semantic_chunker: bool = os.getenv("USE_SEMANTIC_CHUNKER", "false").lower() == "true"
 
-    # proposition extraction adds atomic factual statements to a separate ChromaDB collection; off by default
+    # proposition extraction
     use_proposition_extraction: bool = os.getenv("USE_PROPOSITION_EXTRACTION", "false").lower() == "true"
+    proposition_extraction_concurrency: int = int(os.getenv("PROPOSITION_EXTRACTION_CONCURRENCY", "5"))
 
     # allowed MIME types for upload
     allowed_mime_types: list[str] = [
@@ -66,6 +69,51 @@ class Settings(BaseModel):
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.ms-excel",
     ]
+
+    # file upload directory; falls back to project-relative "files/" if not set
+    upload_dir: str = os.getenv("UPLOAD_DIR", "")
+
+    # retrieval quality
+    retrieval_min_score: float = float(os.getenv("RETRIEVAL_MIN_SCORE", "0.0"))
+    retrieval_history_context_turns: int = int(os.getenv("RETRIEVAL_HISTORY_CONTEXT_TURNS", "2"))
+
+    # chat history window
+    chat_history_turns: int = int(os.getenv("CHAT_HISTORY_TURNS", "6"))
+    chat_history_max_chars: int = int(os.getenv("CHAT_HISTORY_MAX_CHARS", "8000"))
+
+    # CORS — comma-separated list read from env
+    cors_allowed_origins: list[str] = [
+        o.strip()
+        for o in os.getenv(
+            "CORS_ALLOWED_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173",
+        ).split(",")
+        if o.strip()
+    ]
+
+    # admin panel credentials (required — missing values fail startup)
+    admin_username: str = os.getenv("ADMIN_USERNAME", "")
+    admin_password: str = os.getenv("ADMIN_PASSWORD", "")
+
+    @model_validator(mode="after")
+    def _validate_required_secrets(self) -> "Settings":
+        missing = []
+        if not self.secret_key:
+            missing.append("SECRET_KEY")
+        if not self.database:
+            missing.append("DATABASE")
+        if not self.openai_api_key:
+            missing.append("OPENAI_API_KEY")
+        if not self.admin_username:
+            missing.append("ADMIN_USERNAME")
+        if not self.admin_password:
+            missing.append("ADMIN_PASSWORD")
+        if missing:
+            raise ValueError(
+                f"Required environment variables are not set: {', '.join(missing)}. "
+                "The application cannot start safely without these values."
+            )
+        return self
 
 
 settings = Settings()

@@ -1,618 +1,231 @@
-# Chatpaper — Ingestion & Vectorization Implementation Plan
+# Chatpaper — RAG Architecture Reference
 
 **Branch:** `RAG-Implementation`  
-**Last updated:** 2026-05-20  
-**Purpose:** Authoritative reference for what is implemented, what is in progress, and what is planned. Consult this when context is lost between sessions.
+**Last updated:** 2026-05-20 (all phases implemented)
+
+This document describes the implemented system architecture, design decisions, and configuration reference. All ingestion, retrieval, and security work described here is complete and in production code.
 
 ---
 
-## How to Read This Document
-
-- `[x]` — Fully implemented and verified
-- `[ ]` — Not yet implemented
-- Each phase must be completed in order before the next begins
-- Each item includes a **Why** (the production risk it addresses) and **Where** (which file(s) to touch)
-
----
-
-## Current System State (as of 2026-05-19)
-
-### What Is Working
+## System State
 
 | Component | Status |
 |---|---|
-| FastAPI backend, auth (JWT + RBAC), file upload endpoint | Working |
-| PostgreSQL models: `users`, `files_data`, `conversationlist`, `conversation` | Working |
-| PostgreSQL models: `document_parents`, `ingestion_jobs` | Working |
-| Alembic migrations 0001–0009 | Applied (head) |
+| FastAPI backend, JWT + RBAC auth | Working |
+| PostgreSQL models + Alembic migrations (head: 0009) | Working |
 | Celery + Redis task queue | Working |
-| ChromaDB HTTP client (`core/chroma.py`) with three collections | Working |
-| 6-stage ingestion Celery task (`tasks/ingestion_tasks.py`) | Working — all Phase 0/1/1.5 gaps fixed |
-| Ingestion status endpoint `GET /files/{id}/ingestion-status` | Working |
-| File delete endpoint `DELETE /files/{id}` | Working — ChromaDB vector cleanup added (Phase 0) |
-| Retrieval service (`services/retrieval.py`) | Implemented — dense + BM25 + RRF + summary routing + propositions |
-| Chat endpoint `POST /api/chat/{id}/ask` | Implemented — multi-turn, citations, context injection |
-
-### Known Gaps in the Existing Implementation
-
-These are bugs or missing features that exist today and must be fixed before the retrieval layer is designed.
-
-| # | Gap | Severity | Phase |
-|---|---|---|---|
-| G1 | `user_id` is absent from all ChromaDB metadata — multi-tenant filtering is impossible | Critical | Phase 0 |
-| G2 | No pre-validation before Celery dispatch — oversized/corrupt files occupy a worker for minutes before failing | High | Phase 0 |
-| G3 | Dedup checks `DocumentParent` existence by `file_id`, not by `(user_id, file_hash)` — same file uploaded twice under different name is re-embedded at full cost | High | Phase 0 |
-| G4 | No concurrent-job guard — double-dispatch creates two workers racing on the same file | High | Phase 0 |
-| G5 | Scanned PDFs (zero extractable text) are ingested silently as near-empty vectors, polluting the vector space | High | Phase 0 |
-| G6 | `page_start` / `page_end` columns exist in `document_parents` but are never populated — always NULL | Medium | Phase 1 |
-| G7 | `element_types` is a document-level array in `document_parents`, never written to ChromaDB child chunk metadata — structural filtering at retrieval time is impossible | Medium | Phase 1 |
-| G8 | `DELETE /files/{id}` deletes the file and PostgreSQL row but does NOT delete ChromaDB vectors — orphaned vectors accumulate indefinitely | High | Phase 0 |
-| G9 | No `is_committed` flag on `document_parents` — a failure at Stage 5 after partial writes causes the dedup check to falsely return COMPLETE on retry, leaving vectors permanently missing | Medium | Phase 1 |
-| G10 | No `embedding_model` column anywhere — when the embedding model is upgraded, there is no way to identify which documents need re-embedding | Low | Phase 1 |
-| G11 | Entire `parents_with_children` list is held in memory simultaneously — unsafe for large documents | Medium | Phase 1 |
-| G12 | Document summary is generated from only the first 12,000 characters — unreliable for documents > ~10 pages | Medium | Phase 1 |
-| G13 | Language is never detected despite `langdetect` being installed — `language` column in `files_data` is always NULL | Low | Phase 1 |
-| G14 | CSV/XLSX uses `unstructured` raw text extraction — table structure is destroyed, chunking is semantically meaningless for tabular data | Medium | Phase 1.5 |
-| G15 | TXT files have no encoding detection — `chardet` is installed but not used; non-UTF-8 files produce garbled text silently | Low | Phase 1.5 |
-| G16 | Table boundaries are not enforced during chunking — a table can be split mid-row across two parent chunks | Medium | Phase 1.5 |
+| ChromaDB HTTP client — three collections, cached | Working |
+| 7-stage ingestion pipeline | Working |
+| File upload: pre-validation, MIME magic, size check | Working |
+| Retrieval: dense + BM25 + RRF + summary routing + propositions | Working |
+| Chat endpoint: multi-turn, grounded citations, contextualized retrieval | Working |
+| sqladmin panel: authenticated, password hashes hidden | Working |
+| Startup secret validation | Working |
+| Authenticated file download endpoint (static mount removed) | Working |
 
 ---
 
-## Architecture Summary (Agreed Design)
-
-### Storage Layers
+## Storage Layers
 
 ```
 PostgreSQL
-  files_data          — file ownership, hash, ingestion status, embedding model
-  document_parents    — parent chunk text, page range, element types, is_committed flag
+  files_data          — file ownership, hash, ingestion status, language, embedding_model
+  document_parents    — parent chunk text, page range, element types, is_committed flag, embedding_model
   ingestion_jobs      — per-stage progress, retry tracking, error classification
 
-ChromaDB
+ChromaDB  (cosine distance, module-level cached references)
   child_chunks        — child embeddings + full per-chunk metadata (primary retrieval collection)
   document_summaries  — document-level summary embeddings (routing / coarse retrieval)
+  propositions        — atomic factual proposition embeddings (optional; behind feature flag)
 ```
 
-### Pipeline Stages (Target: 7 stages)
+---
+
+## Ingestion Pipeline (7 Stages)
 
 ```
-Stage 0  Pre-Validation       file size, MIME whitelist, concurrent-job guard
-Stage 1  Structured Parse     unstructured with per-element iteration; CSV/XLSX via pandas
+Stage 0  Pre-Validation       File size (HTTP 413), python-magic MIME check (HTTP 415), concurrent-job guard
+Stage 1  Structured Parse     unstructured per-element iteration; CSV/XLSX via pandas (Markdown table rows)
+                               chardet encoding detection for TXT; scanned-PDF text density check
 Stage 2  Hash + Dedup         SHA-256 streaming hash; global dedup by (user_id, file_hash)
-Stage 3  Parent Chunking      RecursiveCharacterTextSplitter → SemanticChunker (Phase 1.5)
-Stage 4  Child Chunking       per-parent child split; table boundary enforcement
-Stage 5  Embed + Upsert       streaming generator (one parent at a time); full metadata
-Stage 6  Summarization        windowed map-reduce for long docs; embed + upsert
-Stage 7  Finalization         status update, embedding_model write, lock release
+                               page count enforced against max_pages_per_doc; language detection via langdetect
+Stage 3  Parent Chunking      RecursiveCharacterTextSplitter (default) or SemanticChunker (USE_SEMANTIC_CHUNKER=true)
+                               table elements kept atomic; page_start/page_end mapped per chunk
+Stage 4  Child Chunking       per-parent child split; tables pass through as single child
+Stage 5  Embed + Upsert       streaming one parent at a time; is_committed flag prevents partial re-upsert on retry
+                               full metadata: user_id, filename, file_type, language, page_start, page_end,
+                               element_types, file_hash, chunk_index, child_index, parent_id
+Stage 6  Summarization        windowed map-reduce (SUMMARY_WINDOW_SIZE chars per window);
+                               map phase parallelized with ThreadPoolExecutor (SUMMARY_EXTRACTION_CONCURRENCY)
+                               short docs (< SUMMARY_SHORT_DOC_THRESHOLD) use single-call path
+Stage 6.5 Proposition Extract optional (USE_PROPOSITION_EXTRACTION=true); LLM decomposes each parent into
+                               atomic factual statements; parallelized with ThreadPoolExecutor
+Stage 7  Finalization         status → COMPLETE, embedding_model written to files_data + document_parents
 ```
 
-### Target ChromaDB Child Chunk Metadata Schema
+On any terminal failure:
+- `document_parents` rows with `is_committed=False` are deleted (no orphaned partial writes)
+- `files_data.ingestion_status` is synced to the job status (FAILED_RETRYABLE or FAILED_PERMANENT)
+
+---
+
+## ChromaDB Child Chunk Metadata Schema
 
 ```
 file_id        int     — links to files_data.id
-user_id        int     — multi-tenant filtering (CRITICAL, currently missing)
+user_id        int     — multi-tenant filtering
 parent_id      str     — SHA-256 of file_hash:chunk_index (links to document_parents.id)
 child_index    int     — position within parent
 chunk_index    int     — parent position within document
-page_start     int     — first page this chunk covers (currently always NULL)
-page_end       int     — last page this chunk covers (currently always NULL)
-element_types  str     — comma-separated: "NarrativeText,Table" (currently missing from Chroma)
+page_start     int     — first page this chunk covers
+page_end       int     — last page this chunk covers
+element_types  str     — comma-separated: "NarrativeText,Table"
 file_type      str     — MIME type
-language       str     — ISO 639-1 code (currently always NULL)
+language       str     — ISO 639-1 code (or "unknown")
 file_hash      str     — global dedup cross-reference
 filename       str     — display convenience
 ```
 
 ---
 
-## Phase 0 — Foundation Hardening
+## Retrieval Pipeline
 
-**Goal:** Fix all critical/high-severity gaps that block correctness and data integrity. No new features. No retrieval work begins until Phase 0 is complete.
-
-**Why this phase first:** Gaps G1, G3, G4, and G8 are data integrity issues — existing documents are missing multi-tenant isolation, and deleted files leave orphaned vectors. These cannot be patched later without a full re-ingestion of all existing documents.
-
----
-
-### P0.1 — Add `user_id` to ChromaDB Metadata
-**Status:** `[x]`  
-**Fixes:** G1  
-**Why:** Without `user_id` in ChromaDB metadata, the retrieval layer cannot filter by user — every query returns results from all users' documents. This is a data isolation failure. Adding it after documents are already embedded requires re-ingesting all of them.  
-**Where:**
-- `backend/tasks/ingestion_tasks.py` — `_stage_embed_upsert()`: add `"user_id": file_record.user_id` to `child_metas`
-- `backend/tasks/ingestion_tasks.py` — `_stage_summarize()`: add `"user_id"` to summary metadata; requires passing `user_id` as a parameter
-- `backend/tasks/ingestion_tasks.py` — `run_ingestion()`: pass `file_record.user_id` into both stage functions
-- `backend/core/chroma.py` — no schema change needed; ChromaDB metadata is schemaless
-
-**Acceptance criteria:**
-- Every document upserted to `child_chunks` has `metadata["user_id"]` set to the owning user's integer ID
-- Every document upserted to `document_summaries` has `metadata["user_id"]` set
-- Verified by querying ChromaDB after a test upload and inspecting the metadata dict
-
----
-
-### P0.2 — ChromaDB Vector Cleanup on File Delete
-**Status:** `[x]`  
-**Fixes:** G8  
-**Why:** Currently `DELETE /files/{id}` removes the file from disk and from `files_data` (which cascades to `document_parents` and `ingestion_jobs`), but ChromaDB vectors are never touched. Every deleted file leaves orphaned child chunk and summary vectors in ChromaDB forever. This accumulates silently and costs money on every query that returns irrelevant results.  
-**Where:**
-- `backend/services/files.py` — `delete_file()`: before `db.delete(record)`, call `collection.delete(where={"file_id": file_id})` on both `child_chunks` and `document_summaries` collections
-- `backend/core/chroma.py` — add helper `delete_vectors_for_file(file_id: int)` that issues the delete on both collections
-
-**Acceptance criteria:**
-- After `DELETE /files/{id}`, a ChromaDB `get(where={"file_id": id})` returns empty results for both collections
-
----
-
-### P0.3 — Global Dedup by `(user_id, file_hash)`
-**Status:** `[x]`  
-**Fixes:** G3  
-**Why:** The current dedup check is `db.query(DocumentParent).filter(DocumentParent.file_id == file_id).first()`. This only catches re-submission of the same `file_id`, not the same file uploaded twice under a different name. A user can upload the same 50-page PDF with a different filename and pay full embedding cost twice. The SHA-256 hash is already computed at Stage 2 — it just isn't used as the dedup key.  
-**Where:**
-- `backend/tasks/ingestion_tasks.py` — Stage 2: replace the `DocumentParent` existence check with a query on `files_data` for any other record with the same `(user_id, file_hash)` that is not the current `file_id` and has status COMPLETE
-- `backend/alembic/versions/` — new migration: add `UNIQUE INDEX ix_files_data_user_file_hash ON files_data (user_id, file_hash)`; this is a partial unique constraint to avoid blocking on NULL hashes before ingestion runs
-
-**Acceptance criteria:**
-- Uploading the same file twice (different filenames, same user) results in the second ingestion job completing immediately with `deduped=True`
-- The second `files_data` row exists (for UI listing) but no new vectors are written to ChromaDB
-
----
-
-### P0.4 — Concurrent Ingestion Job Guard
-**Status:** `[x]`  
-**Fixes:** G4  
-**Why:** If the API is called twice rapidly for the same file (e.g., network retry from the client), two `IngestionJob` rows are created and two Celery workers race to write the same vectors. ChromaDB `upsert` is idempotent by ID so vectors are not duplicated, but PostgreSQL writes and status updates from two workers interleave non-deterministically, leaving the job in an inconsistent state.  
-**Where:**
-- `backend/alembic/versions/` — new migration: `CREATE UNIQUE INDEX ix_ingestion_jobs_one_active_per_file ON ingestion_jobs (file_id) WHERE status NOT IN ('COMPLETE', 'FAILED_PERMANENT')`
-- `backend/services/files.py` — `upload_files()`: before creating a new `IngestionJob`, query for any existing non-terminal job for this `file_id`; if found, return the existing record without dispatching a second task
-
-**Acceptance criteria:**
-- Calling the upload endpoint twice for the same file in quick succession creates exactly one active `IngestionJob`
-
----
-
-### P0.5 — Scanned PDF Detection
-**Status:** `[x]`  
-**Fixes:** G5  
-**Why:** A scanned PDF has no extractable text — `unstructured` returns empty or near-empty elements in `"fast"` mode. The current pipeline does not check text yield and will ingest the document as a near-empty vector (`""` or a few whitespace characters). This produces noise vectors in the retrieval collection that degrade retrieval quality for every query.  
-**Where:**
-- `backend/tasks/ingestion_tasks.py` — after `_stage_parse()` returns, compute `text_density = len(raw_text.strip()) / max(file_path.stat().st_size, 1)`. If the file is > 50 KB and `text_density < 0.001` (configurable), call `_fail_permanent()` with `error_type="LIKELY_SCANNED_PDF"` and a user-readable message.
-- `backend/core/config.py` — add `scanned_pdf_text_density_threshold: float` setting
-
-**Acceptance criteria:**
-- A scanned PDF (or any near-empty parsed document) results in `IngestionJob.status = "FAILED_PERMANENT"` and `error_type = "LIKELY_SCANNED_PDF"`
-- No vectors are written to ChromaDB for the document
-
----
-
-### P0.6 — Pre-Validation Stage (Stage 0)
-**Status:** `[x]`  
-**Fixes:** G2  
-**Why:** Currently, a 300 MB file is written to disk, a database row is created, and a Celery task is dispatched before any size check happens. The size check occurs inside the task after the file has already occupied worker memory during parsing. Validation must happen at the API layer before the file is even saved to disk.  
-**Where:**
-- `backend/api/routers/file_handling/files.py` — `upload_file()`: before calling `files.upload_files()`, check `file.size` (or read the first chunk to compute size) against `settings.max_file_size_mb`; reject with HTTP 413 if exceeded
-- `backend/services/files.py` — `upload_files()`: validate `file.content_type` against a whitelist of accepted MIME types; reject with HTTP 415 if not in the list
-- `backend/core/config.py` — add `allowed_mime_types: list[str]` setting
-
-**Accepted MIME types:**
 ```
-application/pdf
-application/vnd.openxmlformats-officedocument.wordprocessingml.document
-application/msword
-text/plain
-text/csv
-application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-application/vnd.ms-excel
+retrieve(query, user_id, file_ids?, top_k)
+  1. Summary routing   — if file_ids is None, embed query against document_summaries
+                         to narrow to the top-N most relevant files
+  2. Dense retrieve    — query child_chunks collection filtered by user_id (+ file_ids if set)
+                         group by parent_id; keep best similarity per parent
+  3. BM25 retrieve     — PostgreSQL full-text search on document_parents.content
+                         returns {parent_id: rank} dict
+  4. Proposition retr. — optional; query propositions collection; same grouping as dense
+  5. RRF fusion        — Reciprocal Rank Fusion across all result lists
+  6. Score filter      — drop parents below RETRIEVAL_MIN_SCORE (default 0.0; tune to ~0.3)
+  7. DB fetch          — retrieve parent text from PostgreSQL for top_k parents
 ```
 
-**Acceptance criteria:**
-- Uploading a file above `MAX_FILE_SIZE_MB` returns HTTP 413 with a clear message before any disk write
-- Uploading an unsupported file type returns HTTP 415
+---
+
+## Chat Endpoint
+
+```
+POST /api/chat/{conversation_id}/ask
+  1. Fetch history    — last CHAT_HISTORY_TURNS turns, truncated to CHAT_HISTORY_MAX_CHARS
+  2. Build query      — prepend last RETRIEVAL_HISTORY_CONTEXT_TURNS assistant turns to question
+                        (fixes follow-up question retrieval degradation)
+  3. Retrieve         — call retrieve() with contextualized query
+  4. Build prompt     — numbered context blocks + history + HumanMessage(raw question)
+  5. LLM invoke       — gpt-4o-mini
+  6. Ground citations — regex scan for [N] markers in answer; only referenced contexts become citations
+  7. Persist          — save user + assistant turns to conversation table
+```
 
 ---
 
-## Phase 1 — Metadata Enrichment & Pipeline Correctness
+## Security Measures
 
-**Goal:** Populate all metadata fields that the retrieval layer will need. Fix the partial-write bug. Add memory-safe streaming. Improve summarization for long documents.
-
-**Why this phase second:** Phase 0 ensures no more corrupt data enters the system. Phase 1 makes the data that does enter rich enough to support every planned retrieval strategy without re-ingestion.
-
-**Prerequisite:** All Phase 0 items complete.
-
----
-
-### P1.1 — Per-Chunk `page_start` / `page_end` Population
-**Status:** `[x]`  
-**Fixes:** G6  
-**Why:** The `page_start` and `page_end` columns exist in `document_parents` and the Alembic migration is already applied, but they are never written. Without them, page-level filtering ("show me what's on page 12") is impossible at retrieval time. This requires refactoring Stage 1 to return element-level data rather than a single concatenated string.  
-**Where:**
-- `backend/tasks/ingestion_tasks.py` — `_stage_parse()`: instead of returning `raw_text: str`, return a list of `ParsedElement(text, page_number, element_type)` objects
-- `backend/tasks/ingestion_tasks.py` — `_stage_parent_chunk()`: accept `list[ParsedElement]`; after splitting, map each parent chunk to the page range of the elements it contains
-- `backend/tasks/ingestion_tasks.py` — `_stage_embed_upsert()`: write `page_start` and `page_end` to `DocumentParent` row and include them in ChromaDB child chunk metadata
-
-**Acceptance criteria:**
-- After ingesting a multi-page PDF, `document_parents.page_start` and `page_end` are non-NULL for every row
-- ChromaDB child chunk metadata contains `page_start` and `page_end` as integers
-
----
-
-### P1.2 — Per-Chunk `element_types` in ChromaDB Metadata
-**Status:** `[x]`  
-**Fixes:** G7  
-**Why:** `element_types` is currently a PostgreSQL array on `document_parents` at the document level — it is never written to individual child chunk metadata in ChromaDB. At retrieval time, there is no way to filter for only narrative text or only table content. ChromaDB metadata values must be flat strings; the array will be serialized as a comma-separated string.  
-**Where:**
-- Builds on P1.1 refactor — element type is already tracked per `ParsedElement`
-- `backend/tasks/ingestion_tasks.py` — `_stage_parent_chunk()`: collect unique element types from elements within each parent chunk; pass as comma-separated string
-- `backend/tasks/ingestion_tasks.py` — `_stage_embed_upsert()`: add `"element_types": "NarrativeText,Table"` to `child_metas`
-
-**Acceptance criteria:**
-- ChromaDB child chunk metadata contains `element_types` as a non-empty comma-separated string for every chunk
-
----
-
-### P1.3 — Language Detection
-**Status:** `[x]`  
-**Fixes:** G13  
-**Why:** `langdetect` is already installed. The `language` column exists in `files_data`. Language is simply never detected. Without it, future language-aware retrieval (e.g., only query English documents, or use a multilingual embedding model for non-English content) is impossible.  
-**Where:**
-- `backend/tasks/ingestion_tasks.py` — Stage 2 (after hash): `from langdetect import detect; language = detect(raw_text[:2000])`; write to `file_record.language` and include `"language"` in ChromaDB metadata via P1.1 refactor
-- Wrap in `try/except LangDetectException` — if detection fails, default to `"unknown"`
-
-**Acceptance criteria:**
-- `files_data.language` is populated (e.g., `"en"`) after ingestion
-- ChromaDB child chunk metadata contains `"language"` for every chunk
-
----
-
-### P1.4 — Streaming Generator Pattern + `is_committed` Flag
-**Status:** `[x]`  
-**Fixes:** G9, G11  
-**Why (G11 — memory):** `_stage_child_chunk()` currently returns `list[tuple[str, list[str]]]` — the entire document's parent and child texts in one list. For a 500-page document this can be thousands of strings held simultaneously in a single worker's heap. The fix is to yield one parent at a time.  
-**Why (G9 — partial write bug):** If `_stage_embed_upsert()` crashes halfway through, some `DocumentParent` rows exist in PostgreSQL but their children are absent from ChromaDB. The Stage 2 dedup check finds the `DocumentParent` rows and incorrectly declares the document COMPLETE. An `is_committed` flag on each `DocumentParent` row marks which parents have had their children successfully upserted to ChromaDB. On retry, Stage 5 skips committed parents and resumes from the first uncommitted one.  
-**Where:**
-- `backend/alembic/versions/` — new migration: add `is_committed BOOLEAN NOT NULL DEFAULT FALSE` to `document_parents`
-- `backend/models/ingestion.py` — add `is_committed` column to `DocumentParent`
-- `backend/tasks/ingestion_tasks.py` — `_stage_child_chunk()`: convert to a generator that yields `(ParentChunk, list[str])` one at a time
-- `backend/tasks/ingestion_tasks.py` — `_stage_embed_upsert()`: process one parent at a time; after successful ChromaDB upsert for a parent, set `is_committed=True` on its `DocumentParent` row and commit; on retry, skip rows where `is_committed=True`
-
-**Acceptance criteria:**
-- Ingesting a large document does not require holding all chunks in memory at once
-- If Stage 5 is interrupted mid-document, retry resumes from the last uncommitted parent and the document reaches COMPLETE status
-
----
-
-### P1.5 — `embedding_model` Column Tracking
-**Status:** `[x]`  
-**Fixes:** G10  
-**Why:** When the embedding model is upgraded (e.g., from `text-embedding-3-small` to `text-embedding-3-large`), there is no way to identify which documents are already on the new model and which need re-embedding. Without this column, the only option is to re-embed everything — expensive and time-consuming.  
-**Where:**
-- `backend/alembic/versions/` — new migration: add `embedding_model VARCHAR(100)` to both `files_data` and `document_parents`
-- `backend/models/file_model.py` — add `embedding_model` column to `FileRecord`
-- `backend/models/ingestion.py` — add `embedding_model` column to `DocumentParent`
-- `backend/tasks/ingestion_tasks.py` — Stage 7 (finalization): write `settings.openai_embedding_model` to `file_record.embedding_model` and to each `DocumentParent.embedding_model`
-
-**Acceptance criteria:**
-- After ingestion, `files_data.embedding_model` contains the model name (e.g., `"text-embedding-3-small"`)
-
----
-
-### P1.6 — Map-Reduce Summarization for Long Documents
-**Status:** `[x]`  
-**Fixes:** G12  
-**Why:** The current summarizer passes `raw_text[:12_000]` to the LLM. For a 500-page document this covers roughly the first 2% of the content. The generated summary describes only the introduction and is useless for retrieval routing. A windowed map-reduce approach summarizes the document in sections and then combines the section summaries into a final document summary.  
-**Where:**
-- `backend/tasks/ingestion_tasks.py` — `_stage_summarize()`: split `raw_text` into windows of `settings.summary_window_size` characters (default 10,000); summarize each window with a short prompt ("summarize this section in 2 sentences"); combine section summaries into a final summary with a second LLM call
-- `backend/core/config.py` — add `summary_window_size: int` and `summary_short_doc_threshold: int` (documents below threshold use the existing single-call path)
-
-**Acceptance criteria:**
-- A 100-page PDF produces a summary that accurately describes the full document, not just the first few pages
-
----
-
-## Phase 1.5 — Parser & Chunker Upgrades
-
-**Goal:** Replace the weakest parsing and chunking components with production-quality alternatives. These are isolated module swaps — they do not change the pipeline stage structure or database schema (except where noted).
-
-**Why this phase third:** Phase 0 and Phase 1 fix correctness and data integrity. Phase 1.5 improves the quality of what enters the pipeline. SemanticChunker in particular will produce measurably better retrieval results but requires Phase 1 metadata enrichment to be in place first (chunk boundaries are derived from parsed elements).
-
-**Prerequisite:** All Phase 0 and Phase 1 items complete.
-
----
-
-### P1.5.1 — SemanticChunker Integration
-**Status:** `[x]`  
-**Why:** `RecursiveCharacterTextSplitter` splits by character count with no awareness of topic boundaries. A paragraph about one topic and the next paragraph about a different topic may land in the same chunk — or the same topic may be split across two chunks. `SemanticChunker` (from `langchain-experimental`) uses embedding similarity between consecutive sentences to find natural topic boundary points, producing chunks that align with semantic shifts. This directly improves retrieval precision.  
-**Where:**
-- `backend/tasks/ingestion_tasks.py` — `_stage_parent_chunk()`: add a config flag `settings.use_semantic_chunker: bool`; if True, use `SemanticChunker(embeddings=OpenAIEmbeddings(...), breakpoint_threshold_type="percentile")` instead of `RecursiveCharacterTextSplitter`
-- `backend/core/config.py` — add `use_semantic_chunker: bool = False` (feature flag — disabled by default, enabled after validation)
-
-**Note:** `SemanticChunker` uses embedding calls during ingestion (one per sentence boundary candidate). This increases ingestion cost slightly. Enable only after validating retrieval quality improvement on a representative document set.
-
-**Acceptance criteria:**
-- With `USE_SEMANTIC_CHUNKER=true`, parent chunks align with topic boundaries rather than character counts
-- Pipeline still completes successfully; per-chunk page range and element type metadata are still populated
-
----
-
-### P1.5.2 — CSV / XLSX Structured Parsing via Pandas
-**Status:** `[x]`  
-**Fixes:** G14  
-**Why:** `unstructured` extracts CSV/XLSX as raw text, discarding column structure. A row becomes a space-separated string of values with no column headers — indistinguishable from prose. `pandas` preserves the tabular structure, enabling row-group chunking (e.g., 50 rows per parent chunk as a Markdown table) that produces coherent, filterable chunks.  
-**Where:**
-- `backend/tasks/ingestion_tasks.py` — `_stage_parse()`: detect `file_type in {"text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}`; branch to a pandas-based parse path
-- Pandas path: read CSV/XLSX with header validation; serialize each row group as Markdown using `df.to_markdown()`; yield as `ParsedElement(text=markdown_table, page_number=1, element_type="Table")`
-- Empty sheets detected and skipped; `pandas.errors.ParserError` classified as `FAILED_PERMANENT`
-
-**Acceptance criteria:**
-- After ingesting a CSV, each parent chunk contains a Markdown table with column headers
-- Empty or malformed CSVs result in `FAILED_PERMANENT` with a clear error type
-
----
-
-### P1.5.3 — Table Boundary Enforcement During Chunking
-**Status:** `[x]`  
-**Fixes:** G16  
-**Why:** A table split mid-row across two parent chunks is meaningless — row context requires the header to be present. The chunker must treat each table element as an atomic unit that is never split across chunk boundaries.  
-**Where:**
-- `backend/tasks/ingestion_tasks.py` — `_stage_parent_chunk()`: before applying the text splitter, identify `ParsedElement` items with `element_type="Table"`; if a table's text is below `parent_chunk_size`, inject it as an atomic chunk; if it exceeds `parent_chunk_size`, keep it as a single oversized parent chunk (do not split) and log a warning
-- Child chunker: tables that are a single parent receive a single child (no further splitting)
-
-**Acceptance criteria:**
-- After ingesting a PDF with tables, no child chunk contains a partial table row without its corresponding header
-
----
-
-### P1.5.4 — `chardet` Encoding Detection for TXT Files
-**Status:** `[x]`  
-**Fixes:** G15  
-**Why:** Legacy TXT files encoded in Windows-1252, ISO-8859-1, or Latin-1 produce `UnicodeDecodeError` or garbled characters when read as UTF-8. `chardet` is already installed. Detecting encoding before parsing and passing it as a hint to `unstructured` prevents silent data corruption.  
-**Where:**
-- `backend/tasks/ingestion_tasks.py` — `_stage_parse()`: for `file_type="text/plain"`, read the first 10 KB with `chardet.detect()`; pass the detected encoding to `partition(filename=..., encoding=detected_encoding)`
-- If confidence < 0.7, default to UTF-8 and log a warning
-
-**Acceptance criteria:**
-- A Windows-1252 encoded TXT file is parsed without garbled characters or `UnicodeDecodeError`
-
----
-
-## Phase 2 — Retrieval Layer Design & Implementation
-
-**Goal:** Design and implement the query-time retrieval pipeline using the enriched vectors and metadata produced by Phases 0–1.5.
-
-**Why this phase last:** Retrieval quality is entirely dependent on ingestion quality. Beginning retrieval design before ingestion metadata is correct and complete leads to retrieval strategies that are constrained by missing data. Phases 0–1.5 ensure the ingestion data is production-ready; Phase 2 then has full flexibility.
-
-**Prerequisite:** All Phase 0, Phase 1, and Phase 1.5 items complete. At least 10 representative documents ingested and their ChromaDB metadata verified.
-
----
-
-### P2.1 — Retrieval Layer Architecture Design
-**Status:** `[x]`  
-**Why:** This is a separate design exercise. The retrieval layer will use the enriched metadata (user_id, page_start, element_types, language, parent_id) to implement one or more of the following strategies, selected based on query type. To be designed in a dedicated session.
-
-**Planned retrieval strategies (to be selected and implemented):**
-- Dense vector retrieval (baseline — child chunk similarity search)
-- Parent-child retrieval (retrieve child → fetch parent from PostgreSQL for answer synthesis)
-- Metadata filtering (user_id scope, page range, element type, language)
-- Multi-vector retrieval (child chunks + document summary routing)
-- Reranking (parent text as context window for cross-encoder reranking)
-- Contextual compression (LLM-based compression of retrieved parent to relevant span)
-- Hybrid retrieval (dense + BM25 keyword index — requires P2.3)
-
----
-
-### P2.2 — Proposition Extraction Pipeline (Phase 2 addition)
-**Status:** `[x]`  
-**Why:** Proposition extraction decomposes parent chunks into atomic, self-contained factual statements. Each proposition is embedded separately. At retrieval time, a question like "what year was X founded?" matches a proposition vector more precisely than a full paragraph chunk. This was deferred from Phase 1 because LLM hallucination during extraction is a silent failure mode that requires validation tooling before production use.  
-**Where:** New ChromaDB collection `propositions`; new Stage 6.5 in the ingestion pipeline (additive — no existing stages modified).
-
----
-
-### P2.3 — BM25 Hybrid Retrieval Index
-**Status:** `[x]`  
-**Why:** Dense vector retrieval fails on exact keyword matches (product codes, model numbers, proper nouns). BM25 keyword retrieval is complementary — it excels exactly where dense retrieval is weak. Hybrid retrieval combines both scores (Reciprocal Rank Fusion or weighted sum). `rank-bm25` is already installed.  
-**Where:** Either a PostgreSQL full-text index on `document_parents.content` (simpler, already in the same DB) or a dedicated Elasticsearch index (more scalable, separate infrastructure). Decision to be made at Phase 2 design time.
-
----
-
-## Phase 3 — Security Fixes, Pipeline Hardening & Test Suite Overhaul
-
-**Goal:** Fix security vulnerabilities discovered during audit, close two pipeline correctness gaps, and bring the test suite into sync with the real codebase. All existing tests written against old function signatures are currently broken and will fail.
-
-**Why this phase now:** Phases 0–2 produced a functionally complete system, but the audit found three security bugs (file ownership not enforced on list/status/delete endpoints), two silent data correctness gaps (empty parse result, stale retryable status), and a test suite that can no longer run because function signatures changed during Phase 1 refactors. None of these require schema changes.
-
-**Prerequisite:** All Phase 0, 1, 1.5, and 2 items complete. Alembic at head (0009).
-
----
-
-### P3.1 — Fix File Endpoint Ownership Checks
-**Status:** `[x]`
-**Severity:** Critical — any authenticated user can read, probe, or delete any other user's files.
-**Why:** `list_files` has no `user_id` filter — it returns every file from every user. `get_ingestion_status` and `delete_file` accept a bare `file_id` with no ownership verification — any user who knows the integer ID can probe status or delete a file they don't own.
-**Where:**
-- `backend/api/routers/file_handling/files.py` — `list_files()`: add `.filter(FileRecord.user_id == _current_user.id)`. Change `_current_user` to `current_user` so the dependency is used.
-- `backend/api/routers/file_handling/files.py` — `get_ingestion_status()`: before the job query, fetch the `FileRecord` and verify `record.user_id == current_user.id`; raise HTTP 404 if not found or not owned (do not 403 — do not reveal file existence to non-owners).
-- `backend/api/routers/file_handling/files.py` — `delete_file()`: pass `current_user.id` to `files.delete_file()`; add ownership check in `services/files.py` before deleting.
-
-**Acceptance criteria:**
-- `GET /files/` returns only the calling user's files.
-- `GET /files/{id}/ingestion-status` returns 404 for a valid file owned by a different user.
-- `DELETE /files/{id}` returns 404 for a valid file owned by a different user.
-
----
-
-### P3.2 — Guard for Empty Parse Result
-**Status:** `[x]`
-**Severity:** High — a valid-looking file that yields no elements from `_stage_parse()` completes ingestion silently with zero vectors in ChromaDB. The job shows `COMPLETE` but nothing was indexed.
-**Why:** `unstructured` can return an empty element list for certain file types without raising an error (e.g., a PDF with only images that doesn't meet the scanned-PDF size threshold). The pipeline currently has no check after Stage 1 returns — it proceeds through all stages and writes a COMPLETE status with 0 parent chunks.
-**Where:**
-- `backend/tasks/ingestion_tasks.py` — `run_ingestion()`: after `parsed_elements = _stage_parse(...)`, check `if not parsed_elements`. If empty, call `_fail_permanent(job, db, "No text content could be extracted from this document.", "EMPTY_DOCUMENT")` and return.
-
-**Acceptance criteria:**
-- A file that parses to zero elements results in `IngestionJob.status = "FAILED_PERMANENT"` and `error_type = "EMPTY_DOCUMENT"`.
-- No vectors are written, no parent chunks are created.
-
----
-
-### P3.3 — Sync `file_record.ingestion_status` on Retryable Failure
-**Status:** `[x]`
-**Severity:** Medium — when a transient error occurs mid-ingestion and the job is marked `FAILED_RETRYABLE`, `files_data.ingestion_status` still shows `QUEUED`. The file listing endpoint reads from `files_data`, so the UI shows incorrect status.
-**Why:** The retryable failure handler in `run_ingestion()`'s `except` block calls `_fail_retryable(job_fresh, db, ...)` which only updates `ingestion_jobs.status`. It never touches `file_record.ingestion_status`. Only the permanent failure path inside the scanned-PDF check updates the file record explicitly.
-**Where:**
-- `backend/tasks/ingestion_tasks.py` — `run_ingestion()` `except` block: after `_fail_retryable(job_fresh, ...)`, also update `file_record.ingestion_status = IngestionJob.STATUS_FAILED_RETRYABLE` and commit. On `_fail_permanent(job_fresh, ...)`, similarly update `file_record.ingestion_status = IngestionJob.STATUS_FAILED_PERMANENT`. Wrap in its own try/except since the file_record object may be detached after rollback — re-query if needed.
-
-**Acceptance criteria:**
-- After a transient ingestion failure, `files_data.ingestion_status` shows `FAILED_RETRYABLE`, not `QUEUED`.
-- After max retries are exhausted, it shows `FAILED_PERMANENT`.
-
----
-
-### P3.4 — Fix Broken Unit Tests (Signature Drift)
-**Status:** `[x]`
-**Why:** Function signatures changed significantly during Phase 1 and Phase 1.5 refactors. The test suite was not updated in sync. Running `pytest` today will produce failures in five test classes because the tests call functions with the old argument lists.
-
-**Broken test classes and root cause:**
-
-| Class | Root cause |
+| Threat | Mitigation |
 |---|---|
-| `TestStageParentChunk` | Calls `_stage_parent_chunk("some text")` (old: `str`); signature is now `list[ParsedElement]`. Asserts list of strings returned; real return is `list[ParentChunk]`. |
-| `TestStageChildChunk` | Calls `_stage_child_chunk(["parent"])` (old: `list[str]`); signature is now `list[ParentChunk]`. Asserts list returned; real function is a generator. |
-| `TestStageEmbedUpsert` | Calls `_stage_embed_upsert(1, "hash", [...], db)` (4 args); signature is now 8 args (`user_id`, `filename`, `file_type`, `language` added). |
-| `TestStageSummarize` | Calls `_stage_summarize(1, "hash", "text")` (3 args); signature is now 6 args. `test_text_truncated_to_12000_chars` tests old truncation; real code now uses map-reduce. |
-| `TestRunIngestionOrchestrator` | `_patch_happy_stages` patches `_stage_parse` to return a raw tuple; real code does `el.text for el in parsed_elements` on the return value → `AttributeError`. Dedup test uses old `DocumentParent`-based dedup; real code queries `FileRecord` by hash. |
-
-**Where:**
-- `backend/tests/test_ingestion_tasks.py` — rewrite all five broken test classes to match current signatures and return types.
-
----
-
-### P3.5 — Add Missing Tests for Phase 1 / 1.5 Code
-**Status:** `[x]`
-**Why:** The following new functions and behaviors added in Phases 1 and 1.5 have zero test coverage. If any of these break silently, there is no safety net.
-
-**Missing coverage:**
-
-| Function / Behavior | What to test |
-|---|---|
-| `_parse_tabular()` | CSV read + 50-row chunking, XLSX multi-sheet, empty sheet skipped, malformed CSV → `ValueError`, no-data-rows → `ValueError` |
-| `_stage_parse()` chardet branch | Low confidence falls back to UTF-8 and logs warning; high confidence passes encoding to `partition()` |
-| `_stage_parse()` tabular dispatch | Routes CSV/XLSX to `_parse_tabular()` instead of `partition()` |
-| `_stage_parent_chunk()` Table atomicity | Table element emits as a single `ParentChunk` without splitting; oversized table logs warning and is still kept whole |
-| `_stage_parent_chunk()` page range mapping | Chunk `page_start`/`page_end` are derived from the elements it spans |
-| `_stage_parent_chunk()` element_types | Comma-separated unique types collected per chunk |
-| `_stage_child_chunk()` Table passthrough | Parent with `element_types == "Table"` yields child list containing only the parent text unchanged |
-| `_stage_child_chunk()` generator behavior | Function is a generator — result must be consumed, not compared to a list directly |
-| `_stage_embed_upsert()` `is_committed` skip | Existing parent row with `is_committed=True` is skipped; `is_committed=False` is processed |
-| `_stage_embed_upsert()` new metadata fields | `user_id`, `filename`, `file_type`, `language`, `page_start`, `page_end`, `element_types` present in ChromaDB metadata |
-| `_stage_summarize()` map-reduce path | Doc longer than `summary_short_doc_threshold` → multiple LLM calls (one per window + one reduce call) |
-| `_stage_extract_propositions()` | Fetches parents, calls LLM, strips numbering, batches upsert; empty propositions list → skipped without error |
-| `run_ingestion()` scanned PDF | `text_density < threshold` and `file_size > min_size` → `FAILED_PERMANENT` with `LIKELY_SCANNED_PDF` |
-| `run_ingestion()` global dedup | Second file with same `(user_id, file_hash)` → `COMPLETE` with `deduped=True`; uses `FileRecord` query not `DocumentParent` |
-
-**Where:** `backend/tests/test_ingestion_tasks.py` — add new test classes alongside the fixed broken ones.
+| File type spoofing | `python-magic` reads first 2048 bytes; `Content-Type` header not trusted |
+| Oversized uploads | Size checked before disk write; HTTP 413 returned |
+| Unauthenticated file download | Static mount removed; `GET /files/{id}/download` requires valid JWT |
+| Cross-user file access | All file endpoints verify `file.user_id == current_user.id`; return 404 not 403 |
+| Cross-user conversation access | Conversation endpoints verify ownership; `PATCH /conversation-title/{id}` fixed |
+| Admin panel exposure | `AuthenticationBackend` on sqladmin; `User.password` removed from column list |
+| JWT forgery via empty secret | `model_validator` raises `ValueError` at startup if `SECRET_KEY` is empty |
+| Hardcoded CORS origins | Read from `CORS_ALLOWED_ORIGINS` env var |
+| Malformed email registration | `EmailStr` validator on `UserBase.email` |
 
 ---
 
-### P3.6 — Add Tests for Retrieval Service
-**Status:** `[x]`
-**Why:** `services/retrieval.py` was introduced in Phase 2 and has zero test coverage. It contains the most complex logic in the system (RRF fusion, ChromaDB query wrapping, BM25 SQL, summary routing). Silent bugs here degrade answer quality with no observable error.
+## Configuration Reference
 
-**What to test:**
+All settings are read from environment variables with the listed defaults.
 
-| Function | What to test |
-|---|---|
-| `_where()` | No `file_ids` → returns `{"user_id": user_id}`; single `file_id` → `$and` with `{"file_id": N}`; multiple → `{"file_id": {"$in": [...]}}` |
-| `_chroma_query()` | Returns empty dicts on exception (does not propagate) |
-| `_dense_retrieve()` | Groups by `parent_id`, keeps best similarity per parent; `sim = 1.0 - dist` |
-| `_bm25_retrieve()` | Executes SQL, returns `{parent_id: rank}` dict; returns empty dict on DB exception |
-| `_rrf()` | Single list → scores match `1/(k+rank+1)` formula; multiple lists → parent appearing in both scores higher than one appearing in one |
-| `retrieve()` | Empty ChromaDB returns empty list; summary routing narrows `routing_file_ids`; BM25 disabled → `_bm25_retrieve` not called; top_k limits output |
-
-**Where:** `backend/tests/test_retrieval.py` — new file.
-
----
-
-### P3.7 — Add Tests for Chat Endpoint
-**Status:** `[x]`
-**Why:** `api/routers/chat.py` is entirely untested. It is the user-facing surface of the RAG system. Bugs here mean wrong answers, broken citations, or unguarded access to other users' conversations.
-
-**What to test (all via FastAPI `TestClient`):**
-
-| Scenario | Expected |
-|---|---|
-| Valid request for own conversation | Returns `AskResponse` with `answer` and `citations` |
-| `conversation_id` belonging to another user | HTTP 404 |
-| `conversation_id` that doesn't exist | HTTP 404 |
-| Conversation history injected | Messages built in chronological order with correct `user_type` mapping |
-| `file_ids` passed in request | `retrieve()` called with those `file_ids` |
-| LLM unavailable (import guard) | HTTP 503 |
-| `Conversation` rows saved after ask | Two new rows in DB (user turn + assistant turn) |
-
-**Where:** `backend/tests/test_chat_router.py` — new file.
-
----
-
-### P3.8 — Add Missing Chroma Client Tests
-**Status:** `[x]`
-**Why:** `get_propositions_collection()` and `delete_vectors_for_file()` were added in Phase 2 but `test_chroma_client.py` has no tests for them.
-**Where:**
-- `backend/tests/test_chroma_client.py` — add `TestGetPropositionsCollection` mirroring the existing pattern; add `TestDeleteVectorsForFile` verifying `delete()` is called on all three collections with `{"file_id": N}`.
-
----
-
-## Migration Checklist
-
-Migrations that need to be created in `backend/alembic/versions/`:
-
-| # | Migration | Phase | Status |
-|---|---|---|---|
-| M1 | Add `UNIQUE INDEX` on `files_data(user_id, file_hash)` | Phase 0 | `[x]` `0007_add_dedup_and_job_guard_indexes.py` |
-| M2 | Add partial unique index on `ingestion_jobs(file_id) WHERE status NOT IN ('COMPLETE','FAILED_PERMANENT')` | Phase 0 | `[x]` `0007_add_dedup_and_job_guard_indexes.py` |
-| M3 | Add `is_committed BOOLEAN NOT NULL DEFAULT FALSE` to `document_parents` | Phase 1 | `[x]` `0008_add_is_committed_and_embedding_model.py` |
-| M4 | Add `embedding_model VARCHAR(100)` to `files_data` | Phase 1 | `[x]` `0008_add_is_committed_and_embedding_model.py` |
-| M5 | Add `embedding_model VARCHAR(100)` to `document_parents` | Phase 1 | `[x]` `0008_add_is_committed_and_embedding_model.py` |
-| M6 | Add GIN FTS index on `document_parents.content` | Phase 2 | `[x]` `0009_add_fts_index.py` |
-
-No new migrations needed for Phase 3.
-
----
-
-## Dependency Status
-
-All required dependencies are already in `requirements.txt` and installed:
-
-| Package | Purpose | Used? |
+| Env Var | Default | Purpose |
 |---|---|---|
-| `langchain-experimental` | SemanticChunker | `[x]` Wired behind `USE_SEMANTIC_CHUNKER` flag (Phase 1.5) |
-| `langdetect` | Language detection | `[x]` Wired in Stage 2 (Phase 1) |
-| `chardet` | TXT encoding detection | `[x]` Wired in `_stage_parse()` for `text/plain` (Phase 1.5) |
-| `python-magic` | MIME validation | `[x]` Wired via `settings.allowed_mime_types` in router (Phase 0) |
-| `rank-bm25` | BM25 hybrid retrieval | `[x]` PostgreSQL FTS used instead (simpler, same DB); `rank-bm25` not needed |
-| `pandas` / `openpyxl` | CSV/XLSX structured parse | `[x]` Wired in `_parse_tabular()` (Phase 1.5) |
-| `pytesseract` | OCR (scanned PDFs) | `[ ]` Future / optional |
+| `SECRET_KEY` | **required** | JWT signing key |
+| `DATABASE` | **required** | PostgreSQL connection string |
+| `OPENAI_API_KEY` | **required** | OpenAI API key |
+| `ADMIN_USERNAME` | **required** | sqladmin login username |
+| `ADMIN_PASSWORD` | **required** | sqladmin login password |
+| `ALGORITHM` | `HS256` | JWT algorithm |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | JWT lifetime |
+| `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
+| `OPENAI_CHAT_MODEL` | `gpt-4o-mini` | Chat / summarization model |
+| `LLM_SUMMARY_TEMPERATURE` | `0.1` | LLM temperature for summarization |
+| `CHROMA_HOST` | `localhost` | ChromaDB host |
+| `CHROMA_PORT` | `8001` | ChromaDB port |
+| `CHROMA_COLLECTION_CHILD_CHUNKS` | `child_chunks` | Collection name |
+| `CHROMA_COLLECTION_SUMMARIES` | `document_summaries` | Collection name |
+| `CHROMA_COLLECTION_PROPOSITIONS` | `propositions` | Collection name |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis client URL |
+| `CELERY_BROKER_URL` | `redis://localhost:6379/0` | Celery broker |
+| `CELERY_RESULT_BACKEND` | `redis://localhost:6379/1` | Celery result backend |
+| `MAX_FILE_SIZE_MB` | `200` | Reject uploads above this size |
+| `MAX_PAGES_PER_DOC` | `500` | Fail ingestion if page count exceeds |
+| `PARENT_CHUNK_SIZE` | `1800` | Max chars per parent chunk |
+| `PARENT_CHUNK_OVERLAP` | `200` | Overlap between parent chunks |
+| `CHILD_CHUNK_SIZE` | `400` | Max chars per child chunk |
+| `CHILD_CHUNK_OVERLAP` | `60` | Overlap between child chunks |
+| `EMBEDDING_BATCH_SIZE` | `100` | Vectors per ChromaDB upsert batch |
+| `SCANNED_PDF_MIN_FILE_SIZE_BYTES` | `51200` | Min file size to trigger density check |
+| `SCANNED_PDF_TEXT_DENSITY_THRESHOLD` | `0.001` | text_len / file_size below this → LIKELY_SCANNED_PDF |
+| `SUMMARY_SHORT_DOC_THRESHOLD` | `12000` | Docs below this use single-call summarization |
+| `SUMMARY_WINDOW_SIZE` | `10000` | Chars per map-reduce window |
+| `SUMMARY_EXTRACTION_CONCURRENCY` | `5` | ThreadPoolExecutor workers for map phase |
+| `USE_SEMANTIC_CHUNKER` | `false` | Enable SemanticChunker for parent splitting |
+| `USE_PROPOSITION_EXTRACTION` | `false` | Enable Stage 6.5 proposition extraction |
+| `PROPOSITION_EXTRACTION_CONCURRENCY` | `5` | ThreadPoolExecutor workers for proposition LLM calls |
+| `UPLOAD_DIR` | *(project root `files/`)* | Absolute path for uploaded files |
+| `RETRIEVAL_MIN_SCORE` | `0.0` | Drop RRF results below this score (tune to ~0.3) |
+| `RETRIEVAL_HISTORY_CONTEXT_TURNS` | `2` | Prior assistant turns prepended to retrieval query |
+| `CHAT_HISTORY_TURNS` | `6` | Max conversation turns fetched |
+| `CHAT_HISTORY_MAX_CHARS` | `8000` | Total char budget for history before truncation |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,...` | Comma-separated allowed origins |
 
 ---
 
-## Decision Log
+## Database Migrations
 
-| Decision | Reason | Alternatives Rejected |
+| Migration file | What it adds |
+|---|---|
+| `0001` – `0006` | Users, files_data, conversations, document_parents, ingestion_jobs baseline schema |
+| `0007_add_dedup_and_job_guard_indexes.py` | `UNIQUE INDEX (user_id, file_hash)` on files_data; partial unique index on ingestion_jobs active jobs |
+| `0008_add_is_committed_and_embedding_model.py` | `is_committed BOOLEAN` on document_parents; `embedding_model VARCHAR(100)` on files_data and document_parents |
+| `0009_add_fts_index.py` | GIN full-text search index on document_parents.content for BM25 retrieval |
+
+---
+
+## Dependencies
+
+| Package | Purpose |
+|---|---|
+| `langchain-experimental` | SemanticChunker (behind `USE_SEMANTIC_CHUNKER` flag) |
+| `langdetect` | Language detection in Stage 2 |
+| `chardet` | Encoding detection for TXT files in Stage 1 |
+| `python-magic` | MIME type validation from file bytes at upload |
+| `pandas` / `openpyxl` | Structured CSV/XLSX parsing in Stage 1 |
+| `rank-bm25` | Not used — PostgreSQL FTS used instead (same DB, no extra infrastructure) |
+| `pytesseract` | Not used — OCR is a future / optional enhancement |
+
+---
+
+## Design Decisions
+
+| Decision | Reason | Alternatives rejected |
 |---|---|---|
-| Two ChromaDB collections (child_chunks + document_summaries) | Separates precision retrieval units from routing signals; avoids mixing embedding spaces | Single collection (confounds retrieval types), three collections (premature before proposition extraction is validated) |
-| `RecursiveCharacterTextSplitter` for Phase 1 parent chunking | Deterministic, fast, no extra API calls during ingestion, well-understood failure modes | `SemanticChunker` deferred to Phase 1.5 — adds embedding cost per-ingestion; validate quality first |
-| `text-embedding-3-small` as default model | Cost-effective; 1536 dimensions; strong multilingual support | `text-embedding-3-large` (higher cost, marginal quality gain for this domain); open-source models (require self-hosted inference) |
-| SHA-256 deterministic IDs for all ChromaDB entries | Idempotent upsert on retry; no vector duplication on worker crash and restart | UUID-based IDs (non-deterministic; retry creates duplicate vectors) |
-| Proposition extraction deferred to Phase 2 | LLM hallucination during extraction is a silent quality failure; requires validation tooling | Implementing in Phase 1 (risks polluting the vector space with hallucinated propositions before we can detect them) |
-| pandas for CSV/XLSX instead of unstructured | Preserves column structure; enables Markdown table serialization; headers are retained in every chunk | unstructured (destroys structure; row becomes space-separated values with no column context) |
-| PostgreSQL for parent storage (not ChromaDB) | Parent chunks are large text blobs; ChromaDB is not optimized for large document storage; PostgreSQL supports efficient `WHERE parent_id = ?` lookups | Storing parents in ChromaDB as a second collection (expensive full collection scan to retrieve one parent) |
-| 404 (not 403) for cross-user resource access | Do not reveal resource existence to non-owners — 403 confirms the resource exists | 403 Forbidden (leaks information about other users' data) |
-
----
-
-## Session Handoff Notes
-
-When resuming work in a new session:
-
-1. Read this file first
-2. Check the `[x]` / `[ ]` status for each item in the current phase
-3. Verify the current phase's items are actually complete by reading the relevant source files — do not trust the checklist alone if time has passed
-4. Do not begin Phase N+1 work until all Phase N items are checked off
-5. Update this file's status markers as work is completed
-6. The branch is `RAG-Implementation`; the main branch is `main`
+| Three ChromaDB collections | Separates precision retrieval (child chunks), routing signals (summaries), and atomic facts (propositions) | Single collection confounds embedding spaces |
+| SHA-256 deterministic ChromaDB IDs | Idempotent upsert on retry; no vector duplication if worker crashes mid-stage | UUID IDs are non-deterministic; retry creates duplicate vectors |
+| `is_committed` flag on document_parents | Allows Stage 5 to resume from the last uncommitted parent on retry without re-embedding already-upserted chunks | No flag means a crash mid-stage leaves partial writes with no recovery path |
+| Global dedup by `(user_id, file_hash)` | Prevents re-embedding the same file uploaded twice under different names; hash computed during ingestion at Stage 2 | Dedup by file_id only catches same-record re-submission, not same-content re-uploads |
+| Partial unique index for concurrent-job guard | Database-enforced: only one non-terminal IngestionJob per file at a time; prevents two workers racing on the same file | Application-level check alone is subject to race conditions |
+| postgresql FTS over rank-bm25 | Same DB, no extra service; GIN index provides fast keyword search; BM25 scoring via `ts_rank` | Elasticsearch (separate infrastructure, operationally heavier) |
+| ThreadPoolExecutor over asyncio in Celery | Celery workers are synchronous; `asyncio.gather` requires an event loop that Celery does not provide by default | `asyncio.run()` wrapper inside Celery adds overhead and nesting complexity |
+| Authenticated download endpoint | Static file mounts bypass FastAPI's dependency injection — auth cannot be enforced; `FileResponse` from a route handler keeps the full JWT chain intact | Custom auth middleware on the static mount is fragile and runs before routing |
+| 404 not 403 for cross-user resources | Do not reveal resource existence to non-owners — 403 confirms the resource exists | 403 leaks information about other users' data |
+| Conversational query enrichment over HyDE | Prepending the last assistant turn to the retrieval query is deterministic, adds zero API calls, and fixes the majority of multi-turn follow-up degradation | HyDE (generate a hypothetical answer then embed it) adds one full LLM call to every retrieval |
+| sqladmin AuthenticationBackend | Protects the admin panel with a separate credential without removing operational tooling | Removing sqladmin entirely; reverse-proxy basic auth (fragile, not app-integrated) |
+| Startup validation for required secrets | An empty `SECRET_KEY` signs tokens that any attacker can forge; failing at startup surfaces misconfiguration in CI before any requests are served | Logging a warning only (ignored in automated deployments) |
+| pandas for CSV/XLSX | Preserves column structure and headers; enables Markdown table serialization per row group | unstructured destroys table structure; rows become space-separated values |
+| `text-embedding-3-small` | Cost-effective; 1536 dimensions; strong multilingual support | `text-embedding-3-large` (marginal quality gain at higher cost) |

@@ -6,27 +6,27 @@ class ConversationListBase(BaseModel):
     conversation_title: str | None = None
 
 
-
 class ConversationListUpdate(BaseModel):
-    id:int
+    id: int
     conversation_title: str | None = None
     is_active: bool | None = None
 
+
 class ConversationListResponse(ConversationListBase):
     id: int
-    conversation_title:str
-    is_active:bool
-
-class ConversationListRequest():
-
-    conversation_title:str
+    conversation_title: str
     is_active: bool
-    
-    
- #################################### Conversation ################################3   
-    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ConversationListRequest(BaseModel):
+    conversation_title: str
+    is_active: bool
+
+
+#################################### Conversation ################################################
+
 class ConversationResponse(BaseModel):
-    
-    statement:str
-    user_type:str
-    
+    statement: str
+    user_type: str
+    model_config = ConfigDict(from_attributes=True)

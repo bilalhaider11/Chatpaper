@@ -13,7 +13,7 @@ def make_settings(**overrides) -> Settings:
         "algorithm": "HS256",
         "database": "postgresql://user:pass@localhost/db",
         "access_token_expire_minutes": 600,
-        "openai_api_key": None,
+        "openai_api_key": "sk-test",
         "openai_embedding_model": "text-embedding-3-small",
         "openai_chat_model": "gpt-4o-mini",
         "llm_summary_temperature": 0.1,
@@ -21,6 +21,7 @@ def make_settings(**overrides) -> Settings:
         "chroma_port": 8001,
         "chroma_collection_child_chunks": "child_chunks",
         "chroma_collection_summaries": "document_summaries",
+        "chroma_collection_propositions": "propositions",
         "redis_url": "redis://localhost:6379/0",
         "celery_broker_url": "redis://localhost:6379/0",
         "celery_result_backend": "redis://localhost:6379/1",
@@ -31,6 +32,23 @@ def make_settings(**overrides) -> Settings:
         "child_chunk_size": 400,
         "child_chunk_overlap": 60,
         "embedding_batch_size": 100,
+        "scanned_pdf_min_file_size_bytes": 51200,
+        "scanned_pdf_text_density_threshold": 0.001,
+        "summary_short_doc_threshold": 12000,
+        "summary_window_size": 10000,
+        "summary_extraction_concurrency": 5,
+        "use_semantic_chunker": False,
+        "use_proposition_extraction": False,
+        "proposition_extraction_concurrency": 5,
+        "allowed_mime_types": ["application/pdf"],
+        "upload_dir": "",
+        "retrieval_min_score": 0.0,
+        "retrieval_history_context_turns": 2,
+        "chat_history_turns": 6,
+        "chat_history_max_chars": 8000,
+        "cors_allowed_origins": ["http://localhost:5173"],
+        "admin_username": "admin",
+        "admin_password": "adminpass",
     }
     defaults.update(overrides)
     return Settings(**defaults)
@@ -67,13 +85,13 @@ class TestLegacyFields:
 
 
 class TestLLMSettings:
-    def test_openai_api_key_is_none_by_default(self):
-        s = make_settings(openai_api_key=None)
-        assert s.openai_api_key is None
-
     def test_openai_api_key_accepts_string(self):
         s = make_settings(openai_api_key="sk-test")
         assert s.openai_api_key == "sk-test"
+
+    def test_openai_api_key_required(self):
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            make_settings(openai_api_key=None)
 
     def test_openai_embedding_model_default(self):
         s = make_settings()
@@ -208,6 +226,49 @@ class TestIngestionLimitSettings:
 
 
 
+class TestPhase4And5Settings:
+    def test_retrieval_min_score_default(self):
+        s = make_settings()
+        assert s.retrieval_min_score == pytest.approx(0.0)
+
+    def test_retrieval_history_context_turns_default(self):
+        s = make_settings()
+        assert s.retrieval_history_context_turns == 2
+
+    def test_chat_history_turns_default(self):
+        s = make_settings()
+        assert s.chat_history_turns == 6
+
+    def test_chat_history_max_chars_default(self):
+        s = make_settings()
+        assert s.chat_history_max_chars == 8000
+
+    def test_cors_allowed_origins_is_list(self):
+        s = make_settings()
+        assert isinstance(s.cors_allowed_origins, list)
+
+    def test_admin_credentials_required(self):
+        with pytest.raises(ValueError, match="ADMIN_USERNAME"):
+            make_settings(admin_username="")
+
+    def test_secret_key_required(self):
+        with pytest.raises(ValueError, match="SECRET_KEY"):
+            make_settings(secret_key="")
+
+    def test_database_required(self):
+        with pytest.raises(ValueError, match="DATABASE"):
+            make_settings(database="")
+
+    def test_summary_extraction_concurrency_default(self):
+        s = make_settings()
+        assert s.summary_extraction_concurrency == 5
+
+    def test_proposition_extraction_concurrency_default(self):
+        s = make_settings()
+        assert s.proposition_extraction_concurrency == 5
+
+
+
 class TestSettingsEdgeCases:
     def test_settings_instances_are_independent(self):
         s1 = make_settings(chroma_port=8001)
@@ -223,13 +284,14 @@ class TestSettingsEdgeCases:
             "redis_url", "celery_broker_url", "celery_result_backend",
             "max_file_size_mb", "max_pages_per_doc", "parent_chunk_size",
             "parent_chunk_overlap", "child_chunk_size", "child_chunk_overlap",
-            "embedding_batch_size",
+            "embedding_batch_size", "retrieval_min_score", "cors_allowed_origins",
+            "admin_username", "admin_password",
         ]
         for field in required_fields:
             assert hasattr(settings, field), f"settings missing field: {field}"
 
     def test_settings_field_count(self):
-        expected_count = 22
+        expected_count = 40
         actual_count = len(Settings.model_fields)
         assert actual_count == expected_count, (
             f"Expected {expected_count} settings fields, got {actual_count}. "

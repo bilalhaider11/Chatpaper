@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -20,6 +22,8 @@ except ImportError:
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+_CITATION_RE = re.compile(r"\[(\d+)\]")
+
 
 def _context_block(ctx: RetrievedContext, index: int) -> str:
     pages = f"pages {ctx.page_start}–{ctx.page_end}" if ctx.page_start else "page unknown"
@@ -41,6 +45,16 @@ def _system_prompt(contexts: list[RetrievedContext]) -> str:
     )
 
 
+def _truncate_history(history: list, max_chars: int) -> list:
+    """Drop oldest turns until total statement length fits within max_chars."""
+    while history:
+        total = sum(len(t.statement) for t in history)
+        if total <= max_chars:
+            break
+        history = history[1:]
+    return history
+
+
 @router.post("/{conversation_id}/ask", response_model=AskResponse)
 async def ask(
     conversation_id: int,
@@ -58,9 +72,30 @@ async def ask(
     if convo is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # use the conversation owner's id so retrieval hits the right user's vectors
+    # Fetch recent history FIRST so we can enrich the retrieval query with prior context.
+    history = (
+        db.query(Conversation)
+        .filter(Conversation.chat_id == conversation_id)
+        .order_by(Conversation.created_at.desc())
+        .limit(settings.chat_history_turns)
+        .all()
+    )
+    history.reverse()
+    history = _truncate_history(history, settings.chat_history_max_chars)
+
+    # Build a contextualized query: prepend last few assistant turns so follow-up
+    # questions like "explain that" embed to meaningful content rather than near-zero.
+    retrieval_query = body.question
+    prior_assistant_turns = [
+        t.statement for t in history
+        if t.user_type == "assistant"
+    ][-settings.retrieval_history_context_turns:]
+    if prior_assistant_turns:
+        prior_context = " ".join(prior_assistant_turns)
+        retrieval_query = f"[Prior context: {prior_context}] {body.question}"
+
     contexts = retrieve(
-        query=body.question,
+        query=retrieval_query,
         user_id=convo.user_id,
         db=db,
         file_ids=body.file_ids,
@@ -69,16 +104,6 @@ async def ask(
         use_bm25=body.use_bm25,
         use_propositions=body.use_propositions,
     )
-
-    # last 6 turns for multi-turn context (fetched in reverse, then flipped)
-    history = (
-        db.query(Conversation)
-        .filter(Conversation.chat_id == conversation_id)
-        .order_by(Conversation.created_at.desc())
-        .limit(6)
-        .all()
-    )
-    history.reverse()
 
     messages = [SystemMessage(content=_system_prompt(contexts))]
     for turn in history:
@@ -99,6 +124,8 @@ async def ask(
     db.add(Conversation(chat_id=conversation_id, user_type="assistant", statement=answer))
     db.commit()
 
+    # Only include citations whose [N] marker actually appears in the answer.
+    referenced = {int(m) for m in _CITATION_RE.findall(answer)}
     citations = [
         Citation(
             file_id=c.file_id,
@@ -107,7 +134,8 @@ async def ask(
             page_end=c.page_end,
             content_preview=c.content[:300],
         )
-        for c in contexts
+        for i, c in enumerate(contexts, start=1)
+        if i in referenced
     ]
 
     return AskResponse(answer=answer, citations=citations, conversation_id=conversation_id)

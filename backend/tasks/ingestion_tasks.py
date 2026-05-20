@@ -7,6 +7,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -33,7 +34,8 @@ from models.ingestion import DocumentParent, IngestionJob
 
 logger = logging.getLogger(__name__)
 
-FILES_DIR = Path(__file__).resolve().parents[2] / "files"
+_DEFAULT_FILES_DIR = Path(__file__).resolve().parents[2] / "files"
+FILES_DIR = Path(settings.upload_dir) if settings.upload_dir else _DEFAULT_FILES_DIR
 
 _TABULAR_MIMES = {
     "text/csv",
@@ -231,6 +233,12 @@ def _stage_parent_chunk(parsed_elements: list[ParsedElement]) -> list[ParentChun
             for chunk_text in chunk_texts:
                 chunk_pos = raw_text.find(chunk_text, search_start)
                 if chunk_pos == -1:
+                    if settings.use_semantic_chunker:
+                        logger.warning(
+                            "SemanticChunker produced a chunk not found in raw_text at "
+                            "search_start=%d; page range may be inaccurate for this chunk",
+                            search_start,
+                        )
                     chunk_pos = search_start
                 chunk_end = chunk_pos + len(chunk_text)
                 search_start = chunk_pos + 1
@@ -377,19 +385,25 @@ def _stage_summarize(
         ]
         summary: str = llm.invoke(messages).content
     else:
-        # map: one summary per window
+        # map: summarize each window concurrently
         windows = [
             raw_text[i: i + settings.summary_window_size]
             for i in range(0, len(raw_text), settings.summary_window_size)
         ]
-        section_summaries: list[str] = []
-        for window in windows:
-            msg = [
+
+        def _summarize_window(window: str) -> str:
+            return llm.invoke([
                 SystemMessage(content="Summarize this section in 2 sentences."),
                 HumanMessage(content=window),
-            ]
-            section_summaries.append(llm.invoke(msg).content)
-        # reduce: stitch section summaries into one
+            ]).content
+
+        section_summaries: list[str] = [""] * len(windows)
+        with ThreadPoolExecutor(max_workers=settings.summary_extraction_concurrency) as pool:
+            future_to_idx = {pool.submit(_summarize_window, w): i for i, w in enumerate(windows)}
+            for future in as_completed(future_to_idx):
+                section_summaries[future_to_idx[future]] = future.result()
+
+        # reduce: stitch section summaries into one (synchronous — single call)
         combined = "\n\n".join(section_summaries)
         reduce_msgs = [
             SystemMessage(content=(
@@ -436,17 +450,15 @@ def _stage_extract_propositions(
     collection = get_propositions_collection()
     parents = db.query(DocumentParent).filter(DocumentParent.file_id == file_id).all()
 
-    for parent in parents:
-        messages = [
+    def _extract_parent(parent: DocumentParent) -> None:
+        raw: str = llm.invoke([
             SystemMessage(content=(
                 "Extract every distinct factual statement from the text below as a numbered list. "
                 "Each item must be a single self-contained sentence. "
                 "Do not include vague or subjective claims. One proposition per line."
             )),
             HumanMessage(content=parent.content),
-        ]
-        raw: str = llm.invoke(messages).content
-        # strip numbering/bullets from each line
+        ]).content
         propositions = [
             line.strip().lstrip("0123456789.) -•")
             for line in raw.splitlines()
@@ -454,7 +466,7 @@ def _stage_extract_propositions(
         ]
         propositions = [p for p in propositions if p]
         if not propositions:
-            continue
+            return
 
         prop_ids = [f"prop:{parent.id}:{i}" for i in range(len(propositions))]
         prop_metas = [
@@ -469,13 +481,17 @@ def _stage_extract_propositions(
             }
             for i in range(len(propositions))
         ]
-
         for batch_start in range(0, len(propositions), settings.embedding_batch_size):
             batch_texts = propositions[batch_start: batch_start + settings.embedding_batch_size]
             batch_ids = prop_ids[batch_start: batch_start + settings.embedding_batch_size]
             batch_metas = prop_metas[batch_start: batch_start + settings.embedding_batch_size]
             embeddings = embedder.embed_documents(batch_texts)
             collection.upsert(ids=batch_ids, documents=batch_texts, embeddings=embeddings, metadatas=batch_metas)
+
+    with ThreadPoolExecutor(max_workers=settings.proposition_extraction_concurrency) as pool:
+        futures = [pool.submit(_extract_parent, parent) for parent in parents]
+        for future in as_completed(futures):
+            future.result()  # re-raise any extraction exception
 
 
 # Celery task
@@ -523,6 +539,17 @@ def run_ingestion(self, job_id: int, file_id: int) -> dict[str, Any]:
         job.total_pages = page_count
         file_record.total_pages = page_count
         db.commit()
+
+        # Enforce page limit before doing any expensive work.
+        if page_count > settings.max_pages_per_doc:
+            _fail_permanent(
+                job, db,
+                f"Document has {page_count} pages; maximum is {settings.max_pages_per_doc}.",
+                "DOCUMENT_TOO_LONG",
+            )
+            file_record.ingestion_status = IngestionJob.STATUS_FAILED_PERMANENT
+            db.commit()
+            return {"status": "FAILED_PERMANENT", "reason": "document_too_long"}
 
         # scanned / image-only PDFs yield almost no text — skip them early
         file_size = file_path.stat().st_size
@@ -645,6 +672,11 @@ def run_ingestion(self, job_id: int, file_id: int) -> dict[str, Any]:
                 else:
                     _fail_permanent(job_fresh, db, str(exc), type(exc).__name__)
                     new_status = IngestionJob.STATUS_FAILED_PERMANENT
+                    # Clean up partial writes that can never be completed.
+                    db.query(DocumentParent).filter(
+                        DocumentParent.file_id == file_id,
+                        DocumentParent.is_committed == False,  # noqa: E712
+                    ).delete()
                 file_fresh = db.query(FileRecord).filter(FileRecord.id == file_id).first()
                 if file_fresh:
                     file_fresh.ingestion_status = new_status
