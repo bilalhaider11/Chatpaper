@@ -17,7 +17,7 @@ from tasks.ingestion_tasks import run_ingestion
 logger = logging.getLogger(__name__)
 
 # Prefer UPLOAD_DIR env var; fall back to project-relative "files/" directory.
-_DEFAULT_UPLOAD_DIR = Path(__file__).resolve().parents[4] / "files"
+_DEFAULT_UPLOAD_DIR = Path(__file__).resolve().parents[2] / "files"
 UPLOAD_DIR = Path(settings.upload_dir) if settings.upload_dir else _DEFAULT_UPLOAD_DIR
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 

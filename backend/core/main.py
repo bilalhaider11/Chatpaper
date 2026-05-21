@@ -11,6 +11,7 @@ from core.config import settings
 from core.database import engine
 from models import auth, file_model
 import models.ingestion  # noqa: F401 — registers DocumentParent, IngestionJob with Base
+import models.conversation  # noqa: F401 — registers ConversationList, Conversation with Base
 from api.router import api_router
 from .admin import UserAdmin, authentication_backend
 
