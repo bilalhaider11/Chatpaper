@@ -1,8 +1,8 @@
-import { api } from "../api/axios";
+import { api, API_BASE_URL, tokenStore } from "../api/axios";
 
 export type Conversation = {
   id: number;
-  chat_id: number;
+  chat_id?: number;
   user_type: string;
   statement: string;
 };
@@ -15,8 +15,57 @@ export type ConversationListItem = {
 
 export type ConversationPayload = {
   statement: string;
-  user_type: string;
+  user_type: "user" | "system";
 };
+
+export type ChatWsEvent =
+  | {
+      type: "message";
+      temp_id: string;
+      user_type: "user" | "system";
+      statement: string;
+      chat_id: number;
+      id?: number;
+    }
+  | {
+      type: "chunk";
+      temp_id: string;
+      user_type: "system";
+      chunk: string;
+      chat_id: number;
+    }
+  | {
+      type: "done";
+      temp_id: string;
+      user_type: "system";
+      statement: string;
+      chat_id: number;
+      id?: number;
+    }
+  | {
+      type: "error";
+      detail: string;
+    };
+
+export type LiveMessage = {
+  tempId: string;
+  id?: number;
+  user_type: "user" | "system";
+  statement: string;
+  streaming?: boolean;
+};
+
+export function getChatWebSocketUrl(chatListId: number) {
+  const wsBase = API_BASE_URL.replace(/^http/, "ws").replace(/\/api$/, "");
+  const token = tokenStore.getToken();
+  return `${wsBase}/api/conversation/ws/${chatListId}?token=${encodeURIComponent(token ?? "")}`;
+}
+
+export function normalizeUserType(userType: string): "user" | "system" {
+  const value = userType.toLowerCase();
+  if (value === "system" || value === "assistant") return "system";
+  return "user";
+}
 
 export async function getConversationList() {
   const response = await api.get<ConversationListItem[]>(
@@ -61,14 +110,17 @@ export async function updateConversationTitle(
   return response.data;
 }
 
-export async function deleteConversationList(conversationListid:number){
-
-  const response = await api.delete(`/conversation/delete_list/${conversationListid}`)
+export async function deleteConversationList(conversationListid: number) {
+  const response = await api.delete(
+    `/conversation/delete_list/${conversationListid}`
+  );
   return response.data;
 }
 
-export async function editConversationListTitle(list_id:number, title:string){
-  
-  const response = await api.patch(`/conversation/conversation-title/${list_id}`,{title} )
+export async function editConversationListTitle(list_id: number, title: string) {
+  const response = await api.patch(
+    `/conversation/conversation-title/${list_id}`,
+    { title }
+  );
   return response.data;
 }

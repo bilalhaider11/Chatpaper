@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -8,6 +9,7 @@ from sqladmin import Admin
 from models import auth, file_model
 from api.router import api_router
 from core.config import settings
+from services.messaging import start_messaging, stop_messaging
 from .admin import UserAdmin
 #from fastapi.middleware.cors import CORSMiddleware
 #from starlette.requests import Request
@@ -16,7 +18,14 @@ from starlette.middleware.sessions import SessionMiddleware
 #from google.oauth2 import id_token
 #from google.auth.transport import requests
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await start_messaging()
+    yield
+    await stop_messaging()
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(SessionMiddleware ,secret_key=settings.secret_key, session_cookie="session",same_site="lax",https_only=False)
 

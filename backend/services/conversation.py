@@ -1,15 +1,11 @@
-from pathlib import Path
-from uuid import uuid4
-import shutil
-
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import HTTPException
+from jose import JWTError, jwt
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from core.dependencies import get_db
-from models.conversation import ConversationList, Conversation
-from schema.conversation import ConversationListUpdate,ConversationListResponse
-
+from core.config import settings
+from models.conversation import Conversation, ConversationList
+from services import auth
 
 def create_conversation_list( current_user, db:Session):
     
@@ -82,4 +78,16 @@ def delete_conversation_list(id, db):
     
     return {"Title": "deleted Successfully"}
 
-    
+def get_conversation_list_for_user(chat_list_id: int, user_id: int, db: Session) -> ConversationList:
+    conversation_list = (
+        db.query(ConversationList)
+        .filter(
+            ConversationList.id == chat_list_id,
+            ConversationList.user_id == user_id,
+            ConversationList.is_active == True,
+        )
+        .first()
+    )
+    if not conversation_list:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conversation_list

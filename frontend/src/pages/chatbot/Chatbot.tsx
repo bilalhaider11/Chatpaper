@@ -1,26 +1,29 @@
 import "./Chatbot.css";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
+import SystemMessageModal from "../../components/chatbot/SystemMessageModal";
+import FileUpload from "../../components/fileUpload/FileUpload";
+import { DeleteIcon, EditIcon } from "../../components/icons/ActionIcons";
+import { useChatWebSocket } from "../../hooks/useChatWebSocket";
 import {
+  ChatWsEvent,
   Conversation,
   ConversationListItem,
   createConversationList,
   getConversation,
   getConversationList,
-  postConversationChat,
+  LiveMessage,
+  normalizeUserType,
   deleteConversationList,
-  editConversationListTitle
+  editConversationListTitle,
 } from "../../services/conversation_api";
-import FileUpload from "../../components/fileUpload/FileUpload";
-import { DeleteIcon, EditIcon } from "../../components/icons/ActionIcons";
 
 function Chatbot() {
-
-  // Inside your component:
   const [editingId, setEditingId] = useState(0);
   const [editTitle, setEditTitle] = useState("");
-  const [isopen,setisopen] = useState(false);
+  const [isopen, setisopen] = useState(false);
+  const [systemModalOpen, setSystemModalOpen] = useState(false);
   const navigate = useNavigate();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -30,9 +33,11 @@ function Chatbot() {
     null
   );
   const [messages, setMessages] = useState<Conversation[]>([]);
+  const [liveMessages, setLiveMessages] = useState<LiveMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingChat, setCreatingChat] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendingSystem, setSendingSystem] = useState(false);
 
   const loadConversationList = async () => {
     const list = await getConversationList();
@@ -43,7 +48,100 @@ function Chatbot() {
   const loadMessages = async (conversationListId: number) => {
     const data = await getConversation(conversationListId);
     setMessages(data);
+    setLiveMessages([]);
   };
+
+  const handleWsEvent = useCallback((event: ChatWsEvent) => {
+    if (event.type === "error") return;
+
+    if (event.type === "message") {
+      setLiveMessages((prev) => {
+        if (prev.some((item) => item.tempId === event.temp_id)) return prev;
+        return [
+          ...prev,
+          {
+            tempId: event.temp_id,
+            user_type: normalizeUserType(event.user_type),
+            statement: event.statement,
+          },
+        ];
+      });
+      return;
+    }
+
+    if (event.type === "chunk") {
+      setLiveMessages((prev) => {
+        const index = prev.findIndex((item) => item.tempId === event.temp_id);
+        if (index >= 0) {
+          const next = [...prev];
+          next[index] = {
+            ...next[index],
+            statement: next[index].statement + event.chunk,
+            streaming: true,
+          };
+          return next;
+        }
+        return [
+          ...prev,
+          {
+            tempId: event.temp_id,
+            user_type: "system",
+            statement: event.chunk,
+            streaming: true,
+          },
+        ];
+      });
+      return;
+    }
+
+    if (event.type === "done") {
+      setLiveMessages((prev) => {
+        const index = prev.findIndex((item) => item.tempId === event.temp_id);
+        if (index >= 0) {
+          const next = [...prev];
+          next[index] = {
+            ...next[index],
+            statement: event.statement,
+            streaming: false,
+            id: event.id,
+          };
+          return next;
+        }
+        return [
+          ...prev,
+          {
+            tempId: event.temp_id,
+            user_type: "system",
+            statement: event.statement,
+          },
+        ];
+      });
+    }
+  }, []);
+
+  const { sendMessage: sendWsMessage } = useChatWebSocket({
+    chatListId: selectedConversationId,
+    onEvent: handleWsEvent,
+    enabled: Boolean(selectedConversationId),
+  });
+
+  const displayedMessages = useMemo(() => {
+    const persisted = messages.map((message) => ({
+      key: `db-${message.id}`,
+      user_type: normalizeUserType(message.user_type),
+      statement: message.statement,
+      streaming: false,
+    }));
+
+    const live = liveMessages.map((message) => ({
+      key: message.tempId,
+      user_type: message.user_type,
+      statement: message.statement,
+      streaming: Boolean(message.streaming),
+    }));
+
+    return [...persisted, ...live];
+  }, [messages, liveMessages]);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -57,13 +155,11 @@ function Chatbot() {
         setUser(currentUser);
         const list = await loadConversationList();
         if (list.length > 0) {
-          setisopen(false)
-
-          
+          setisopen(false);
           setSelectedConversationId(list[0].id);
           await loadMessages(list[0].id);
-        }else{
-          setisopen(true)
+        } else {
+          setisopen(true);
         }
       } catch {
         tokenStore.clear();
@@ -78,7 +174,7 @@ function Chatbot() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [displayedMessages]);
 
   const handleSelectConversation = async (conversationListId: number) => {
     setSelectedConversationId(conversationListId);
@@ -92,16 +188,18 @@ function Chatbot() {
       setConversations((prev) => [newConversation, ...prev]);
       setSelectedConversationId(newConversation.id);
       setMessages([]);
+      setLiveMessages([]);
     } finally {
       setCreatingChat(false);
     }
   };
 
-  const handleSend = async (event?: FormEvent) => {
-    event?.preventDefault();
-
-    const text = input.trim();
-    if (!text || sending) return;
+  const sendChatMessage = async (
+    text: string,
+    userType: "user" | "system",
+    setBusy: (value: boolean) => void
+  ) => {
+    if (!text.trim() || sending || sendingSystem) return;
 
     let conversationListId = selectedConversationId;
 
@@ -117,21 +215,30 @@ function Chatbot() {
       }
     }
 
-    setSending(true);
-    setInput("");
+    setBusy(true);
 
-    try {
-      await postConversationChat(conversationListId!, {
-        statement: text,
-        user_type: "client",
-      });
-      await loadMessages(conversationListId!);
-      await loadConversationList();
-    } catch {
-      setInput(text);
-    } finally {
-      setSending(false);
+    const sent = sendWsMessage(text, userType);
+    if (!sent) {
+      setBusy(false);
+      return;
     }
+
+    if (userType === "user") {
+      setInput("");
+    }
+
+    setBusy(false);
+  };
+
+  const handleSend = async (event?: FormEvent) => {
+    event?.preventDefault();
+    const text = input.trim();
+    if (!text) return;
+    await sendChatMessage(text, "user", setSending);
+  };
+
+  const handleSystemSend = async (text: string) => {
+    await sendChatMessage(text, "system", setSendingSystem);
   };
 
   const logout = () => {
@@ -149,6 +256,7 @@ function Chatbot() {
         await loadMessages(nextId);
       } else {
         setMessages([]);
+        setLiveMessages([]);
         setisopen(true);
       }
     }
@@ -159,19 +267,17 @@ function Chatbot() {
     setEditTitle(conversation.conversation_title || "New chat");
   };
 
-  // Saves the input and closes the form
-  const handleSaveEdit = async (
-    e: React.FormEvent,
-    id: number
-  ) => {
+  const handleSaveEdit = async (e: React.FormEvent, id: number) => {
     e.preventDefault();
 
     if (!editTitle.trim()) return;
 
     try {
       await editConversationListTitle(editingId, editTitle);
-      setConversations(prev =>
-        prev.map(item => item.id === id ? { ...item, conversation_title: editTitle } : item)
+      setConversations((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, conversation_title: editTitle } : item
+        )
       );
 
       setEditingId(0);
@@ -179,9 +285,6 @@ function Chatbot() {
       console.error("Failed to update title:", error);
     }
   };
-
-
-
 
   if (loading) {
     return <div className="chatbot-loading">Loading...</div>;
@@ -219,10 +322,9 @@ function Chatbot() {
                 onClick={() => void handleSelectConversation(conversation.id)}
               >
                 {editingId === conversation.id ? (
-                  /* Inline 1-Field Edit Form */
                   <form
                     onSubmit={(e) => handleSaveEdit(e, conversation.id)}
-                    onClick={(e) => e.stopPropagation()} // Prevents selecting the conversation while typing
+                    onClick={(e) => e.stopPropagation()}
                     className="edit-form"
                   >
                     <input
@@ -233,10 +335,17 @@ function Chatbot() {
                       className="edit-input"
                     />
                     <button type="submit">Save</button>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); setEditingId(0); }}>Cancel</button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingId(0);
+                      }}
+                    >
+                      Cancel
+                    </button>
                   </form>
                 ) : (
-                  /* Normal View Mode */
                   <>
                     <span className="conversation-title">
                       {conversation.conversation_title || "New chat"}
@@ -271,8 +380,6 @@ function Chatbot() {
             ))
           )}
         </nav>
-        
-
 
         <div className="sidebar-footer">
           <Link to="/" className="sidebar-link">
@@ -283,7 +390,6 @@ function Chatbot() {
           </button>
         </div>
       </aside>
-      
 
       <main className="chatbot-main">
         <header className="chatbot-header">
@@ -291,18 +397,25 @@ function Chatbot() {
             <h1>{activeConversation?.conversation_title ?? "Assistant"}</h1>
             <span>{user?.email}</span>
           </div>
+          <button
+            type="button"
+            className="system-msg-btn"
+            onClick={() => setSystemModalOpen(true)}
+            disabled={!selectedConversationId || creatingChat}
+          >
+            System message
+          </button>
         </header>
 
         <section className="chatbot-messages">
-          {/* Conditionally render the popup */}
-      {isopen ? (
-        <FileUpload
-          variant="modal"
-          onClose={() => setisopen(false)}
-          subtitle="Upload a document to use with this chat session."
-        />
-      ) : null}
-          {!selectedConversationId && messages.length === 0 ? (
+          {isopen ? (
+            <FileUpload
+              variant="modal"
+              onClose={() => setisopen(false)}
+              subtitle="Upload a document to use with this chat session."
+            />
+          ) : null}
+          {!selectedConversationId && displayedMessages.length === 0 ? (
             <div className="chatbot-empty-state">
               <h2>How can I help you today?</h2>
               <p>Start a new chat or select a conversation from the sidebar.</p>
@@ -315,19 +428,25 @@ function Chatbot() {
                 Start chat
               </button>
             </div>
-          ) : messages.length === 0 ? (
+          ) : displayedMessages.length === 0 ? (
             <div className="chatbot-empty-state compact">
               <p>Send a message to begin this conversation.</p>
             </div>
           ) : (
-            messages.map((message) => (
+            displayedMessages.map((message) => (
               <div
-                key={message.id}
-                className={`chat-msg ${message.user_type === "client" ? "assistant" : "client"
-                  }`}
+                key={message.key}
+                className={`chat-msg ${message.user_type === "user" ? "user" : "system"}${
+                  message.streaming ? " streaming" : ""
+                }`}
               >
-
-                <div className="chat-msg-content">{message.statement}</div>
+                <div className="chat-msg-label">
+                  {message.user_type === "user" ? "You" : "System"}
+                </div>
+                <div className="chat-msg-content">
+                  {message.statement}
+                  {message.streaming ? <span className="stream-cursor">▍</span> : null}
+                </div>
               </div>
             ))
           )}
@@ -346,11 +465,16 @@ function Chatbot() {
               Send
             </button>
           </form>
-          
         </footer>
       </main>
+
+      <SystemMessageModal
+        open={systemModalOpen}
+        onClose={() => setSystemModalOpen(false)}
+        onSend={handleSystemSend}
+        sending={sendingSystem}
+      />
     </div>
-    
   );
 }
 
