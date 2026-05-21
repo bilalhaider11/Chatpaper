@@ -6,13 +6,13 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from passlib.context import CryptContext
+from core.config import settings
 from core.database import SessionLocal
 from models.auth import User, UserRole
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 ADMIN_EMAIL = "admin@chatpaper.com"
-ADMIN_PASSWORD = "admin123"
 
 
 def seed_admin() -> None:
@@ -24,13 +24,13 @@ def seed_admin() -> None:
 
         admin = User(
             email=ADMIN_EMAIL,
-            password=pwd_context.hash(ADMIN_PASSWORD),
+            password=pwd_context.hash(settings.admin_password),
             role=UserRole.admin,
             is_active=True,
         )
         db.add(admin)
         db.commit()
-        print(f"      Admin user created — {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
+        print(f"      Admin user created — {ADMIN_EMAIL}")
     finally:
         db.close()
 

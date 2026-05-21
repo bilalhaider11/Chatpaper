@@ -9,6 +9,9 @@ from alembic import context
 from core.database import Base
 from core.config import settings
 from models.auth import User
+from models.file_model import FileRecord  # noqa: F401
+from models.ingestion import DocumentParent, IngestionJob  # noqa: F401
+from models.conversation import ConversationList, Conversation  # noqa: F401
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config

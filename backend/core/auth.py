@@ -1,21 +1,24 @@
-from fastapi import HTTPException, status, Depends
-from sqlalchemy.orm import Session
-from models.auth import UserRole, User
-from schema import auth as schema_auth
-from passlib.context import CryptContext
 from datetime import datetime, timedelta, timezone
-from jose import JWTError, jwt
 from typing import Annotated
-from services import auth
-from core.config import settings
+
+from fastapi import Depends, HTTPException, status
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from sqlalchemy.orm import Session
+
 from core import dependencies
+from core.config import settings
+from models.auth import User
+from services import auth
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-# =====================> login/logout <============================
-def verify_password(plain_password, hashed_password):
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
-def authenticate_user(db: Session, email: str, password: str):
+
+def authenticate_user(db: Session, email: str, password: str) -> User | bool:
     member = auth.get_user_by_email(db, email)
     if not member:
         return False
@@ -23,18 +26,21 @@ def authenticate_user(db: Session, email: str, password: str):
         return False
     return member
 
-def create_access_token(data: dict, expires_delta: timedelta | None = None):
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=15)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
-    return encoded_jwt
+    return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
 
-# get current users info 
-def get_current_user(token: Annotated[str, Depends(dependencies.oauth2_scheme)], db: Annotated[Session, Depends(dependencies.get_db)]):
+
+def get_current_user(
+    token: Annotated[str, Depends(dependencies.oauth2_scheme)],
+    db: Annotated[Session, Depends(dependencies.get_db)],
+) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid authentication credentials",
@@ -48,7 +54,6 @@ def get_current_user(token: Annotated[str, Depends(dependencies.oauth2_scheme)],
         user = auth.get_user_by_email(db, current_email)
         if user is None:
             raise credentials_exception
-        
         return user
     except JWTError:
         raise credentials_exception
