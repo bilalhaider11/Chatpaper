@@ -23,11 +23,14 @@ pip install --quiet -r requirements.txt
 echo "[3/7] Setting up .env file..."
 if [ ! -f "$BACKEND_DIR/.env" ]; then
     SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+    ADMIN_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
     cat > "$BACKEND_DIR/.env" <<EOF
 SECRET_KEY=$SECRET_KEY
 ALGORITHM=HS256
 DATABASE=postgresql://postgres:postgres@127.0.0.1:5433/chatpaper
 ACCESS_TOKEN_EXPIRE_MINUTES=600
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=$ADMIN_PASSWORD
 EOF
     echo "      .env created."
 else
@@ -56,6 +59,12 @@ npm install --silent
 echo ""
 echo "=== Setup complete! ==="
 echo ""
+if [ -n "${ADMIN_PASSWORD:-}" ]; then
+    echo "Admin credentials (saved to backend/.env):"
+    echo "  Username : admin"
+    echo "  Password : $ADMIN_PASSWORD"
+    echo ""
+fi
 echo "To start the backend:"
 echo "  cd backend && source venv/bin/activate && uvicorn main:app --reload"
 echo ""
