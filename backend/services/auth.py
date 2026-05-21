@@ -54,8 +54,7 @@ def update_user(db: Session, user_id: int, user: schema_auth.UserUpdate):
 # delete user
 def delete_user(db: Session, user_id: int):
     db_user = get_user_by_id(db, user_id)
+    user_data = {"id": db_user.id, "email": db_user.email, "role": db_user.role}
     db.delete(db_user)
     db.commit()
-    db.refresh(db_user)
-    
-    return db_user
+    return user_data

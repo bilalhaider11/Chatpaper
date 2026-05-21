@@ -1,9 +1,9 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
 from datetime import datetime
 from models import auth
 
 class UserBase(BaseModel):
-	email: str
+    email: EmailStr
 
 class UserCreate(UserBase):
 	password: str

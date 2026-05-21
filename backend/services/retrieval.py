@@ -1,0 +1,231 @@
+from __future__ import annotations
+
+import dataclasses
+import logging
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from core.chroma import (
+    get_child_chunks_collection,
+    get_document_summaries_collection,
+    get_propositions_collection,
+)
+from core.config import settings
+from models.file_model import FileRecord
+from models.ingestion import DocumentParent
+
+logger = logging.getLogger(__name__)
+
+try:
+    from langchain_openai import OpenAIEmbeddings
+except ImportError:
+    OpenAIEmbeddings = None  # type: ignore[assignment,misc]
+
+
+@dataclasses.dataclass
+class RetrievedContext:
+    parent_id: str
+    content: str
+    file_id: int
+    filename: str
+    page_start: int | None
+    page_end: int | None
+    element_types: list[str]
+    score: float  # RRF fused score
+
+
+def _where(user_id: int, file_ids: list[int] | None) -> dict:
+    if not file_ids:
+        return {"user_id": user_id}
+    if len(file_ids) == 1:
+        return {"$and": [{"user_id": user_id}, {"file_id": file_ids[0]}]}
+    return {"$and": [{"user_id": user_id}, {"file_id": {"$in": file_ids}}]}
+
+
+def _chroma_query(collection, query_embedding: list[float], where: dict, n: int) -> dict:
+    try:
+        return collection.query(
+            query_embeddings=[query_embedding],
+            n_results=n,
+            where=where,
+            include=["metadatas", "distances"],
+        )
+    except Exception:
+        logger.exception("ChromaDB query failed")
+        return {"metadatas": [[]], "distances": [[]]}
+
+
+def _dense_retrieve(
+    query_embedding: list[float],
+    user_id: int,
+    file_ids: list[int] | None,
+    n: int,
+) -> dict[str, float]:
+    results = _chroma_query(get_child_chunks_collection(), query_embedding, _where(user_id, file_ids), n)
+    parent_scores: dict[str, float] = {}
+    for meta, dist in zip(results["metadatas"][0], results["distances"][0]):
+        pid = meta.get("parent_id")
+        if not pid:
+            continue
+        sim = 1.0 - dist  # cosine distance = 1 - similarity in ChromaDB
+        if pid not in parent_scores or sim > parent_scores[pid]:
+            parent_scores[pid] = sim
+    return parent_scores
+
+
+def _proposition_retrieve(
+    query_embedding: list[float],
+    user_id: int,
+    file_ids: list[int] | None,
+    n: int,
+) -> dict[str, float]:
+    results = _chroma_query(get_propositions_collection(), query_embedding, _where(user_id, file_ids), n)
+    parent_scores: dict[str, float] = {}
+    for meta, dist in zip(results["metadatas"][0], results["distances"][0]):
+        pid = meta.get("parent_id")
+        if not pid:
+            continue
+        sim = 1.0 - dist
+        if pid not in parent_scores or sim > parent_scores[pid]:
+            parent_scores[pid] = sim
+    return parent_scores
+
+
+def _summary_route(
+    query_embedding: list[float],
+    user_id: int,
+    n_files: int,
+) -> list[int] | None:
+    results = _chroma_query(
+        get_document_summaries_collection(),
+        query_embedding,
+        {"user_id": user_id},
+        n_files,
+    )
+    metas = results["metadatas"][0]
+    if not metas:
+        return None
+    return [int(m["file_id"]) for m in metas]
+
+
+def _bm25_retrieve(
+    query: str,
+    user_id: int,
+    file_ids: list[int] | None,
+    db: Session,
+    n: int,
+) -> dict[str, float]:
+    params: dict = {"query": query, "user_id": user_id, "limit": n}
+    file_filter = ""
+    if file_ids:
+        file_filter = "AND dp.file_id = ANY(:file_ids)"
+        params["file_ids"] = file_ids
+
+    sql = text(f"""
+        SELECT dp.id,
+               ts_rank(to_tsvector('english', dp.content),
+                       plainto_tsquery('english', :query)) AS rank
+        FROM document_parents dp
+        JOIN files_data fd ON dp.file_id = fd.id
+        WHERE fd.user_id = :user_id
+          AND to_tsvector('english', dp.content)
+              @@ plainto_tsquery('english', :query)
+          {file_filter}
+        ORDER BY rank DESC
+        LIMIT :limit
+    """)
+    try:
+        rows = db.execute(sql, params).fetchall()
+    except Exception:
+        logger.exception("BM25 retrieval failed")
+        return {}
+    return {row.id: float(row.rank) for row in rows}
+
+
+def _rrf(ranked_lists: list[list[str]], k: int = 60) -> dict[str, float]:
+    scores: dict[str, float] = {}
+    for ranked in ranked_lists:
+        for rank, pid in enumerate(ranked):
+            scores[pid] = scores.get(pid, 0.0) + 1.0 / (k + rank + 1)
+    return scores
+
+
+def retrieve(
+    query: str,
+    user_id: int,
+    db: Session,
+    file_ids: list[int] | None = None,
+    top_k: int = 5,
+    use_summary_routing: bool = True,
+    use_bm25: bool = True,
+    use_propositions: bool = False,
+) -> list[RetrievedContext]:
+    if OpenAIEmbeddings is None:
+        raise RuntimeError("langchain_openai is not installed")
+
+    embedder = OpenAIEmbeddings(
+        model=settings.openai_embedding_model,
+        api_key=settings.openai_api_key,
+    )
+    query_embedding = embedder.embed_query(query)
+
+    # narrow the child chunk search to files that match the query at the document level
+    routing_file_ids = file_ids
+    if use_summary_routing and file_ids is None:
+        routed = _summary_route(query_embedding, user_id, n_files=10)
+        if routed:
+            routing_file_ids = routed
+
+    fetch_n = top_k * 4
+    ranked_lists: list[list[str]] = []
+
+    dense_scores = _dense_retrieve(query_embedding, user_id, routing_file_ids, fetch_n)
+    if dense_scores:
+        ranked_lists.append(sorted(dense_scores, key=lambda p: dense_scores[p], reverse=True))
+
+    if use_bm25:
+        bm25_scores = _bm25_retrieve(query, user_id, routing_file_ids, db, fetch_n)
+        if bm25_scores:
+            ranked_lists.append(sorted(bm25_scores, key=lambda p: bm25_scores[p], reverse=True))
+
+    if use_propositions:
+        prop_scores = _proposition_retrieve(query_embedding, user_id, routing_file_ids, fetch_n)
+        if prop_scores:
+            ranked_lists.append(sorted(prop_scores, key=lambda p: prop_scores[p], reverse=True))
+
+    if not ranked_lists:
+        return []
+
+    fused = _rrf(ranked_lists)
+    min_score = settings.retrieval_min_score
+    top_ids = [
+        p for p in sorted(fused, key=lambda p: fused[p], reverse=True)
+        if fused[p] >= min_score
+    ][:top_k]
+
+    rows = (
+        db.query(DocumentParent, FileRecord.filename)
+        .join(FileRecord, DocumentParent.file_id == FileRecord.id)
+        .filter(DocumentParent.id.in_(top_ids))
+        .all()
+    )
+
+    parent_map = {dp.id: (dp, fname) for dp, fname in rows}
+    results: list[RetrievedContext] = []
+    for pid in top_ids:
+        if pid not in parent_map:
+            continue
+        dp, fname = parent_map[pid]
+        results.append(RetrievedContext(
+            parent_id=pid,
+            content=dp.content,
+            file_id=dp.file_id,
+            filename=fname,
+            page_start=dp.page_start,
+            page_end=dp.page_end,
+            element_types=dp.element_types or [],
+            score=fused[pid],
+        ))
+
+    return results

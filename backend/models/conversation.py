@@ -4,20 +4,16 @@ from core.database import Base
 
 
 class Conversation(Base):
-    """Maps to `files_data` as defined in Alembic (column names differ from attribute names)."""
-
     __tablename__ = "conversation"
 
     id = Column(Integer, primary_key=True, index=True)
     chat_id = Column(Integer, ForeignKey("conversationlist.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime(timezone=False), server_default=func.now(), nullable=False)
     user_type= Column("user_type", String(50), nullable=False)
-    statement= Column("statement", String(50), nullable=False)
+    statement= Column("statement", Text(), nullable=False)
     
     
 class ConversationList(Base):
-    """Maps to `files_data` as defined in Alembic (column names differ from attribute names)."""
-
     __tablename__ = "conversationlist"
 
     id = Column(Integer, primary_key=True, index=True)
