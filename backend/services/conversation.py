@@ -2,11 +2,12 @@ from fastapi import HTTPException
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from models.conversation import ConversationList, Conversation
-from schema.conversation import ConversationListBase
+from models.auth import User
+from models.conversation import Conversation, ConversationList
+from schema.conversation import ConversationListBase, ConversationResponse
 
 
-def create_conversation_list(current_user, db: Session):
+def create_conversation_list(current_user: User, db: Session) -> ConversationList:
     db_data = ConversationList(
         user_id=current_user.id,
         conversation_title="start chat",
@@ -18,7 +19,9 @@ def create_conversation_list(current_user, db: Session):
     return db_data
 
 
-def update_conversation_title(title: ConversationListBase, conversation_id: int, session: Session):
+def update_conversation_title(
+    title: ConversationListBase, conversation_id: int, session: Session
+) -> dict:
     if not title or not title.conversation_title:
         raise HTTPException(status_code=400, detail="No title to update")
 
@@ -34,31 +37,30 @@ def update_conversation_title(title: ConversationListBase, conversation_id: int,
     return {"Title": "Updated Successfully"}
 
 
-def add_conversation(data, chat_id, db):
+def add_conversation(data: ConversationResponse, chat_id: int, db: Session) -> Conversation:
     if not chat_id:
         raise HTTPException(status_code=400, detail="Chat does not exist")
 
-    statement = Conversation(
+    row = Conversation(
         chat_id=chat_id,
         user_type=data.user_type,
         statement=data.statement,
     )
 
-    db.add(statement)
+    db.add(row)
     db.commit()
-    db.refresh(statement)
+    db.refresh(row)
 
-    return statement
+    return row
 
 
-def get_conversations(chat_list_id, db):
+def get_conversations(chat_list_id: int, db: Session) -> list[Conversation]:
     if not chat_list_id:
         raise HTTPException(status_code=400, detail="Chat does not exist")
 
-    conversations = (
+    return (
         db.query(Conversation)
         .order_by(Conversation.created_at.asc())
         .where(Conversation.chat_id == chat_list_id)
         .all()
     )
-    return conversations

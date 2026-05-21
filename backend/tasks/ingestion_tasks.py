@@ -1,7 +1,3 @@
-"""
-Celery pipeline: parse → hash/dedup → parent chunks → child chunks → embed → summarize.
-"""
-
 from __future__ import annotations
 
 import dataclasses
@@ -15,11 +11,8 @@ from typing import Any, Iterator
 try:
     from langchain.text_splitter import RecursiveCharacterTextSplitter
     from langchain_core.messages import HumanMessage, SystemMessage
-    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 except ImportError:
     RecursiveCharacterTextSplitter = None  # type: ignore[assignment,misc]
-    ChatOpenAI = None  # type: ignore[assignment,misc]
-    OpenAIEmbeddings = None  # type: ignore[assignment,misc]
     HumanMessage = None  # type: ignore[assignment,misc]
     SystemMessage = None  # type: ignore[assignment,misc]
 
@@ -29,6 +22,7 @@ from core.celery_app import celery_app
 from core.chroma import get_child_chunks_collection, get_document_summaries_collection, get_propositions_collection
 from core.config import settings
 from core.database import SessionLocal
+from core.llm import get_chat_llm, get_embedder
 from models.file_model import FileRecord
 from models.ingestion import DocumentParent, IngestionJob
 
@@ -171,16 +165,18 @@ def _stage_hash(file_path: Path) -> str:
 
 
 def _stage_parent_chunk(parsed_elements: list[ParsedElement]) -> list[ParentChunk]:
-    if settings.use_semantic_chunker and OpenAIEmbeddings is not None:
-        from langchain_experimental.text_splitter import SemanticChunker
-        splitter: Any = SemanticChunker(
-            embeddings=OpenAIEmbeddings(
-                model=settings.openai_embedding_model,
-                api_key=settings.openai_api_key,
-            ),
-            breakpoint_threshold_type="percentile",
-        )
-    else:
+    splitter: Any = None
+    if settings.use_semantic_chunker:
+        try:
+            from langchain_experimental.text_splitter import SemanticChunker
+            splitter = SemanticChunker(
+                embeddings=get_embedder(),
+                breakpoint_threshold_type="percentile",
+            )
+        except (ImportError, RuntimeError):
+            pass  # langchain_experimental or langchain_openai missing — fall through to default splitter
+
+    if splitter is None:
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=settings.parent_chunk_size,
             chunk_overlap=settings.parent_chunk_overlap,
@@ -288,10 +284,7 @@ def _stage_embed_upsert(
     parents_with_children: Iterator[tuple[ParentChunk, list[str]]],
     db: Session,
 ) -> None:
-    embedder = OpenAIEmbeddings(
-        model=settings.openai_embedding_model,
-        api_key=settings.openai_api_key,
-    )
+    embedder = get_embedder()
     collection = get_child_chunks_collection()
 
     for parent, children in parents_with_children:
@@ -365,15 +358,8 @@ def _stage_summarize(
     language: str,
     raw_text: str,
 ) -> None:
-    llm = ChatOpenAI(
-        model=settings.openai_chat_model,
-        temperature=settings.llm_summary_temperature,
-        api_key=settings.openai_api_key,
-    )
-    embedder = OpenAIEmbeddings(
-        model=settings.openai_embedding_model,
-        api_key=settings.openai_api_key,
-    )
+    llm = get_chat_llm(temperature=settings.llm_summary_temperature)
+    embedder = get_embedder()
 
     if len(raw_text) <= settings.summary_short_doc_threshold:
         messages = [
@@ -438,15 +424,8 @@ def _stage_extract_propositions(
     language: str,
     db: Session,
 ) -> None:
-    llm = ChatOpenAI(
-        model=settings.openai_chat_model,
-        temperature=0.0,
-        api_key=settings.openai_api_key,
-    )
-    embedder = OpenAIEmbeddings(
-        model=settings.openai_embedding_model,
-        api_key=settings.openai_api_key,
-    )
+    llm = get_chat_llm(temperature=0.0)
+    embedder = get_embedder()
     collection = get_propositions_collection()
     parents = db.query(DocumentParent).filter(DocumentParent.file_id == file_id).all()
 

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from core.auth import get_current_user
 from core.config import settings
 from core.dependencies import get_db
-from models.auth import UserRole
+from models.auth import User, UserRole
 from models.file_model import FileRecord
 from models.ingestion import IngestionJob
 from schema.file import FileRecordResponse, FileRecordUpdate, IngestionStatusResponse
@@ -18,12 +18,19 @@ router = APIRouter(prefix="/files", tags=["files"])
 _MAX_BYTES = settings.max_file_size_mb * 1024 * 1024
 
 
+def _get_owned_file(db: Session, file_id: int, user: User) -> FileRecord:
+    record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
+    if record is None or (user.role != UserRole.admin and record.user_id != user.id):
+        raise HTTPException(status_code=404, detail="File not found")
+    return record
+
+
 @router.post("/upload", response_model=FileRecordResponse)
 async def upload_file(
     file: UploadFile = File(...),
     description: str | None = Form(default=None),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     if file.content_type not in settings.allowed_mime_types:
         raise HTTPException(
@@ -70,7 +77,7 @@ async def upload_file(
 @router.get("/", response_model=list[FileRecordResponse])
 async def list_files(
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     q = db.query(FileRecord).order_by(FileRecord.id.desc())
     if current_user.role != UserRole.admin:
@@ -82,13 +89,9 @@ async def list_files(
 async def download_file(
     file_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
-    if record is None or (
-        current_user.role != UserRole.admin and record.user_id != current_user.id
-    ):
-        raise HTTPException(status_code=404, detail="File not found")
+    record = _get_owned_file(db, file_id, current_user)
 
     from services.files import UPLOAD_DIR
     filename_on_disk = Path(record.filepath).name
@@ -108,13 +111,9 @@ async def download_file(
 async def get_ingestion_status(
     file_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
-    if record is None or (
-        current_user.role != UserRole.admin and record.user_id != current_user.id
-    ):
-        raise HTTPException(status_code=404, detail="File not found")
+    _get_owned_file(db, file_id, current_user)
 
     job = (
         db.query(IngestionJob)
@@ -131,21 +130,17 @@ async def get_ingestion_status(
 async def reingest_file(
     file_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    if current_user.role == UserRole.admin:
-        record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
-        if record is None:
-            raise HTTPException(status_code=404, detail="File not found")
-        return files.reingest_file(file_id, record.user_id, db)
-    return files.reingest_file(file_id, current_user.id, db)
+    record = _get_owned_file(db, file_id, current_user)
+    return files.reingest_file(file_id, record.user_id, db)
 
 
 @router.delete("/{file_id}")
 async def delete_file(
     file_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    owner_id = None if current_user.role == UserRole.admin else current_user.id
-    return files.delete_file(file_id, owner_id, db)
+    record = _get_owned_file(db, file_id, current_user)
+    return files.delete_file(file_id, record.user_id, db)

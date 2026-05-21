@@ -1,5 +1,3 @@
-"""Tests for the chat endpoint (POST /chat/{id}/ask)."""
-
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -79,12 +77,13 @@ def client(app, user):
 
 
 def _patch_llm(mocker, answer: str = "The answer is 42."):
-    llm_cls = mocker.patch("api.routers.chat.ChatOpenAI")
-    llm_cls.return_value.invoke.return_value.content = answer
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value.content = answer
+    mocker.patch("api.routers.chat.get_chat_llm", return_value=mock_llm)
     mocker.patch("api.routers.chat.SystemMessage", side_effect=lambda content: content)
     mocker.patch("api.routers.chat.HumanMessage", side_effect=lambda content: content)
     mocker.patch("api.routers.chat.AIMessage", side_effect=lambda content: content)
-    return llm_cls.return_value
+    return mock_llm
 
 
 
@@ -112,8 +111,8 @@ class TestAskOwnership:
         db = _make_db()
         app.dependency_overrides[get_current_user] = lambda: user
         app.dependency_overrides[get_db] = lambda: db
-        # simulates ImportError at module load time — ChatOpenAI was set to None
-        with patch("api.routers.chat.ChatOpenAI", None):
+        # setting ChatOpenAI to None in core.llm makes get_chat_llm() raise RuntimeError → 503
+        with patch("core.llm.ChatOpenAI", None):
             with TestClient(app) as c:
                 resp = c.post("/chat/1/ask", json={"question": "q"})
         assert resp.status_code == 503

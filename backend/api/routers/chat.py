@@ -13,12 +13,12 @@ from services.retrieval import RetrievedContext, retrieve
 
 try:
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-    from langchain_openai import ChatOpenAI
 except ImportError:
-    ChatOpenAI = None  # type: ignore[assignment,misc]
     AIMessage = None  # type: ignore[assignment,misc]
     HumanMessage = None  # type: ignore[assignment,misc]
     SystemMessage = None  # type: ignore[assignment,misc]
+
+from core.llm import get_chat_llm
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -46,7 +46,6 @@ def _system_prompt(contexts: list[RetrievedContext]) -> str:
 
 
 def _truncate_history(history: list, max_chars: int) -> list:
-    """Drop oldest turns until total statement length fits within max_chars."""
     while history:
         total = sum(len(t.statement) for t in history)
         if total <= max_chars:
@@ -62,7 +61,9 @@ async def ask(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if ChatOpenAI is None:
+    try:
+        llm = get_chat_llm(temperature=0.2)
+    except RuntimeError:
         raise HTTPException(status_code=503, detail="LLM dependencies not installed")
 
     q = db.query(ConversationList).filter(ConversationList.id == conversation_id)
@@ -113,11 +114,6 @@ async def ask(
             messages.append(AIMessage(content=turn.statement))
     messages.append(HumanMessage(content=body.question))
 
-    llm = ChatOpenAI(
-        model=settings.openai_chat_model,
-        temperature=0.2,
-        api_key=settings.openai_api_key,
-    )
     answer: str = llm.invoke(messages).content
 
     db.add(Conversation(chat_id=conversation_id, user_type="user", statement=body.question))

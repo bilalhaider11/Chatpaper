@@ -12,15 +12,11 @@ from core.chroma import (
     get_propositions_collection,
 )
 from core.config import settings
+from core.llm import get_embedder
 from models.file_model import FileRecord
 from models.ingestion import DocumentParent
 
 logger = logging.getLogger(__name__)
-
-try:
-    from langchain_openai import OpenAIEmbeddings
-except ImportError:
-    OpenAIEmbeddings = None  # type: ignore[assignment,misc]
 
 
 @dataclasses.dataclass
@@ -56,13 +52,14 @@ def _chroma_query(collection, query_embedding: list[float], where: dict, n: int)
         return {"metadatas": [[]], "distances": [[]]}
 
 
-def _dense_retrieve(
+def _collection_retrieve(
+    collection,
     query_embedding: list[float],
     user_id: int,
     file_ids: list[int] | None,
     n: int,
 ) -> dict[str, float]:
-    results = _chroma_query(get_child_chunks_collection(), query_embedding, _where(user_id, file_ids), n)
+    results = _chroma_query(collection, query_embedding, _where(user_id, file_ids), n)
     parent_scores: dict[str, float] = {}
     for meta, dist in zip(results["metadatas"][0], results["distances"][0]):
         pid = meta.get("parent_id")
@@ -74,22 +71,22 @@ def _dense_retrieve(
     return parent_scores
 
 
+def _dense_retrieve(
+    query_embedding: list[float],
+    user_id: int,
+    file_ids: list[int] | None,
+    n: int,
+) -> dict[str, float]:
+    return _collection_retrieve(get_child_chunks_collection(), query_embedding, user_id, file_ids, n)
+
+
 def _proposition_retrieve(
     query_embedding: list[float],
     user_id: int,
     file_ids: list[int] | None,
     n: int,
 ) -> dict[str, float]:
-    results = _chroma_query(get_propositions_collection(), query_embedding, _where(user_id, file_ids), n)
-    parent_scores: dict[str, float] = {}
-    for meta, dist in zip(results["metadatas"][0], results["distances"][0]):
-        pid = meta.get("parent_id")
-        if not pid:
-            continue
-        sim = 1.0 - dist
-        if pid not in parent_scores or sim > parent_scores[pid]:
-            parent_scores[pid] = sim
-    return parent_scores
+    return _collection_retrieve(get_propositions_collection(), query_embedding, user_id, file_ids, n)
 
 
 def _summary_route(
@@ -161,13 +158,7 @@ def retrieve(
     use_bm25: bool = True,
     use_propositions: bool = False,
 ) -> list[RetrievedContext]:
-    if OpenAIEmbeddings is None:
-        raise RuntimeError("langchain_openai is not installed")
-
-    embedder = OpenAIEmbeddings(
-        model=settings.openai_embedding_model,
-        api_key=settings.openai_api_key,
-    )
+    embedder = get_embedder()
     query_embedding = embedder.embed_query(query)
 
     # narrow the child chunk search to files that match the query at the document level
@@ -207,7 +198,10 @@ def retrieve(
     rows = (
         db.query(DocumentParent, FileRecord.filename)
         .join(FileRecord, DocumentParent.file_id == FileRecord.id)
-        .filter(DocumentParent.id.in_(top_ids))
+        .filter(
+            DocumentParent.id.in_(top_ids),
+            FileRecord.user_id == user_id,  # re-enforce ownership at DB level; chroma filter alone is not enough
+        )
         .all()
     )
 

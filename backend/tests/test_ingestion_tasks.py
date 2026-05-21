@@ -1,5 +1,3 @@
-"""Unit tests for the ingestion pipeline. All external I/O is mocked."""
-
 from __future__ import annotations
 
 import hashlib
@@ -334,8 +332,9 @@ class TestStageEmbedUpsert:
     def _patch(self, mocker, embeddings=None):
         if embeddings is None:
             embeddings = [[0.1, 0.2, 0.3]]
-        emb_cls = mocker.patch("tasks.ingestion_tasks.OpenAIEmbeddings")
-        emb_cls.return_value.embed_documents.return_value = embeddings
+        mock_emb = MagicMock()
+        mock_emb.embed_documents.return_value = embeddings
+        mocker.patch("tasks.ingestion_tasks.get_embedder", return_value=mock_emb)
 
         collection = MagicMock()
         mocker.patch("tasks.ingestion_tasks.get_child_chunks_collection", return_value=collection)
@@ -344,7 +343,7 @@ class TestStageEmbedUpsert:
         # DocumentParent lookup returns None → is_committed skip does not fire
         db.query.return_value.filter.return_value.first.return_value = None
 
-        return emb_cls.return_value, collection, db
+        return mock_emb, collection, db
 
     def _call(self, db, mocker, file_id=1, user_id=2, file_hash="hash",
               filename="f.pdf", file_type="application/pdf", language="en",
@@ -407,11 +406,13 @@ class TestStageEmbedUpsert:
 
 class TestStageSummarize:
     def _patch(self, mocker, summary: str = "A great document summary."):
-        llm_cls = mocker.patch("tasks.ingestion_tasks.ChatOpenAI")
-        llm_cls.return_value.invoke.return_value.content = summary
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = summary
+        mocker.patch("tasks.ingestion_tasks.get_chat_llm", return_value=mock_llm)
 
-        emb_cls = mocker.patch("tasks.ingestion_tasks.OpenAIEmbeddings")
-        emb_cls.return_value.embed_documents.return_value = [[0.5, 0.6]]
+        mock_emb = MagicMock()
+        mock_emb.embed_documents.return_value = [[0.5, 0.6]]
+        mocker.patch("tasks.ingestion_tasks.get_embedder", return_value=mock_emb)
 
         mocker.patch(
             "tasks.ingestion_tasks.SystemMessage",
@@ -424,7 +425,7 @@ class TestStageSummarize:
 
         col = MagicMock()
         mocker.patch("tasks.ingestion_tasks.get_document_summaries_collection", return_value=col)
-        return llm_cls.return_value, emb_cls.return_value, col
+        return mock_llm, mock_emb, col
 
     def _call(self, mocker, file_id=1, user_id=2, file_hash="hash",
               filename="test.pdf", language="en", text="document text"):
@@ -804,8 +805,9 @@ class TestStageParentChunkMetadata:
 
 class TestStageEmbedUpsertMetadata:
     def _patch(self, mocker):
-        emb_cls = mocker.patch("tasks.ingestion_tasks.OpenAIEmbeddings")
-        emb_cls.return_value.embed_documents.return_value = [[0.1, 0.2]]
+        mock_emb = MagicMock()
+        mock_emb.embed_documents.return_value = [[0.1, 0.2]]
+        mocker.patch("tasks.ingestion_tasks.get_embedder", return_value=mock_emb)
         col = MagicMock()
         mocker.patch("tasks.ingestion_tasks.get_child_chunks_collection", return_value=col)
         db = MagicMock()
@@ -860,11 +862,13 @@ class TestStageEmbedUpsertMetadata:
 
 class TestStageExtractPropositions:
     def _patch(self, mocker, llm_response: str = "1. First fact.\n2. Second fact."):
-        llm_cls = mocker.patch("tasks.ingestion_tasks.ChatOpenAI")
-        llm_cls.return_value.invoke.return_value.content = llm_response
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = llm_response
+        mocker.patch("tasks.ingestion_tasks.get_chat_llm", return_value=mock_llm)
 
-        emb_cls = mocker.patch("tasks.ingestion_tasks.OpenAIEmbeddings")
-        emb_cls.return_value.embed_documents.return_value = [[0.1], [0.2]]
+        mock_emb = MagicMock()
+        mock_emb.embed_documents.return_value = [[0.1], [0.2]]
+        mocker.patch("tasks.ingestion_tasks.get_embedder", return_value=mock_emb)
 
         col = MagicMock()
         mocker.patch("tasks.ingestion_tasks.get_propositions_collection", return_value=col)
@@ -876,7 +880,7 @@ class TestStageExtractPropositions:
             "tasks.ingestion_tasks.HumanMessage",
             side_effect=lambda content: {"role": "user", "content": content},
         )
-        return llm_cls.return_value, emb_cls.return_value, col
+        return mock_llm, mock_emb, col
 
     def _make_db(self, parents):
         db = MagicMock()

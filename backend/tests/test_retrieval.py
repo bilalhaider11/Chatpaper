@@ -1,5 +1,3 @@
-"""Unit tests for the retrieval service. All external I/O is mocked."""
-
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -146,9 +144,10 @@ class TestRrf:
 
 class TestRetrieve:
     def _patch_embedder(self, mocker, embedding=None):
-        emb_cls = mocker.patch("services.retrieval.OpenAIEmbeddings")
-        emb_cls.return_value.embed_query.return_value = embedding or [0.1, 0.2]
-        return emb_cls.return_value
+        mock_emb = MagicMock()
+        mock_emb.embed_query.return_value = embedding or [0.1, 0.2]
+        mocker.patch("services.retrieval.get_embedder", return_value=mock_emb)
+        return mock_emb
 
     def _make_dp(self, pid: str, file_id: int = 1):
         from models.ingestion import DocumentParent

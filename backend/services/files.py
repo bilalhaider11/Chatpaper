@@ -3,12 +3,13 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.chroma import delete_vectors_for_file
 from core.config import settings
+from models.auth import User
 from models.file_model import FileRecord
 from models.ingestion import IngestionJob
 from tasks.ingestion_tasks import run_ingestion
@@ -23,7 +24,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 _TERMINAL_STATUSES = {IngestionJob.STATUS_COMPLETE, IngestionJob.STATUS_FAILED_PERMANENT}
 
 
-def upload_files(file, db: Session, current_user, description):
+def upload_files(file: UploadFile, db: Session, current_user: User, description: str | None) -> FileRecord:
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
 
@@ -79,7 +80,7 @@ def upload_files(file, db: Session, current_user, description):
     return db_record
 
 
-def delete_file(file_id, user_id: int | None, db: Session):
+def delete_file(file_id: int, user_id: int | None, db: Session) -> dict:
     record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
     if record is None or (user_id is not None and record.user_id != user_id):
         raise HTTPException(status_code=404, detail="File not found")
@@ -100,7 +101,7 @@ def delete_file(file_id, user_id: int | None, db: Session):
     return {"message": "File deleted successfully"}
 
 
-def reingest_file(file_id: int, user_id: int, db: Session):
+def reingest_file(file_id: int, user_id: int, db: Session) -> dict:
     record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
     if record is None or record.user_id != user_id:
         raise HTTPException(status_code=404, detail="File not found")
