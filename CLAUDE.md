@@ -42,3 +42,32 @@ Present the plan to the user and wait for approval before implementing.
 - Match the scope of changes to what was actually requested — no opportunistic refactors or unrelated cleanup.
 - No dead code, commented-out code blocks, or `TODO` stubs left behind unless explicitly agreed.
 - Security-first: validate at system boundaries (user input, external APIs); never trust raw input downstream.
+
+---
+
+## Backend Rules (Python / FastAPI)
+
+### Alembic Migrations
+- **Never edit an existing migration file.** Once a migration has been committed, it is immutable — editing it breaks any environment that already ran it.
+- Always generate new migrations with `alembic revision --autogenerate -m "<description>"`.
+- Review the auto-generated migration before committing — autogenerate misses some things (e.g. server-side defaults, custom index types).
+
+### Multi-Tenancy Enforcement
+- Every database query and every ChromaDB query that touches user-owned data **must** include a `user_id` filter. No exceptions.
+- When adding a new endpoint or service method, the first thing to verify is that all data access is scoped to the authenticated user.
+- Cross-user resource access must return **404, not 403** — returning 403 reveals that the resource exists, which leaks information about other users' data.
+
+### Configuration & Environment Variables
+- All environment variables must be declared in `core/config.py` as fields on the Pydantic `Settings` class.
+- Never call `os.environ` or `os.getenv` directly anywhere else in the codebase — always go through the `settings` singleton.
+- Required secrets (e.g. `SECRET_KEY`, `DATABASE`) must use Pydantic validators to fail at startup if missing or empty, not silently at request time.
+
+### Celery Task Idempotency
+- Every Celery task must be safe to retry — assume any task can be interrupted mid-execution and re-queued.
+- For operations that write partial state (e.g. ingestion stages), use a committed/uncommitted flag pattern (like `is_committed` on `document_parents`) so a retry can resume from the last safe checkpoint rather than re-doing or duplicating work.
+- Clean up uncommitted partial writes on terminal failure — don't leave orphaned rows or vectors.
+
+### Tests
+- Every new service module or endpoint must have a corresponding test file under `backend/tests/`.
+- Tests should cover the happy path and at least one failure/edge case per function.
+- Do not mock the database in integration tests — use a real test database to catch migration and query issues that mocks would hide.
