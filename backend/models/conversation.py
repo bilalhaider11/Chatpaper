@@ -4,8 +4,6 @@ from core.database import Base
 
 
 class Conversation(Base):
-    """Maps to `files_data` as defined in Alembic (column names differ from attribute names)."""
-
     __tablename__ = "conversation"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -16,8 +14,6 @@ class Conversation(Base):
     
     
 class ConversationList(Base):
-    """Maps to `files_data` as defined in Alembic (column names differ from attribute names)."""
-
     __tablename__ = "conversationlist"
 
     id = Column(Integer, primary_key=True, index=True)

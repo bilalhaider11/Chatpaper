@@ -71,7 +71,7 @@ async def read_me(
     dependencies=[Depends(RoleChecker(["admin"]))],
 )
 async def read_user_by_id(user_id: int, db: Session = Depends(get_db)):
-    return auth_functions.get_user_by_id(db, user_id)
+    return auth_service.get_user_by_id(db, user_id)
 
 
 @router.patch(
