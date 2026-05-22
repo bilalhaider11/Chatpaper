@@ -50,8 +50,8 @@ Ask    → dense retrieval + BM25 + RRF fusion → GPT-4o-mini → cited answer
 # Redis
 redis-server
 
-# ChromaDB
-chroma run --host localhost --port 8001 --path ./chroma-data
+# ChromaDB (use venv path — system may have an unrelated 'chroma' command)
+backend/venv/bin/chroma run --host localhost --port 8001 --path ./chroma-data
 ```
 
 ### 2. Clone and run setup
