@@ -10,6 +10,7 @@ from sqladmin import Admin
 from core.config import settings
 from core.database import engine
 from models import auth, file_model
+from core.redis_client import stop_redis,start_redis
 import models.ingestion  # noqa: F401 — registers DocumentParent, IngestionJob with Base
 import models.conversation  # noqa: F401 — registers ConversationList, Conversation with Base
 from api.router import api_router
@@ -23,9 +24,11 @@ async def lifespan(app: FastAPI):
     cfg.set_main_option("script_location", str(_ini.parent / "alembic"))
     cfg.set_main_option("sqlalchemy.url", settings.database)
     command.upgrade(cfg, "head")
+    await start_redis()
     await start_messaging()
     yield
     await stop_messaging()
+    await stop_redis()
 
 
 app = FastAPI(lifespan=lifespan)

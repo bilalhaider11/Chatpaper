@@ -16,6 +16,7 @@ class Settings(BaseModel):
     database: str = os.getenv("DATABASE", "")
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
     
+    chat_data_ttl_seconds:int = int(os.getenv("CHAT_DATA_TTL_SECONDS",'3600'))
     
     google_client_id:str = os.getenv("GOOGLE_CLIENT_ID")
     google_client_secret:str = os.getenv("GOOGLE_CLIENT_SECRET")

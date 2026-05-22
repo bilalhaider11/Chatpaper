@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
-
+from services.chat_cache import append_stream_chunk, clear_stream
 from core.auth import get_current_user
 from core.config import settings
 from core.dependencies import get_db
@@ -14,6 +14,7 @@ from schema.conversation import (
     ConversationListResponse,
     ConversationResponse,
 )
+from core.redis_client import get_redis
 from core.websocket import manager
 from core.dependencies import get_db
 from models.auth import User, UserRole
@@ -31,6 +32,7 @@ async def _stream_system_message(chat_list_id: int, statement: str, temp_id: str
     chunk_size = settings.chat_stream_chunk_size
     for index in range(0, len(statement), chunk_size):
         chunk = statement[index : index + chunk_size]
+        await append_stream_chunk(chat_list_id, temp_id, chunk)
         await manager.broadcast(
             chat_list_id,
             {
@@ -42,6 +44,8 @@ async def _stream_system_message(chat_list_id: int, statement: str, temp_id: str
             },
         )
         await asyncio.sleep(0.03)
+        
+    await clear_stream(chat_list_id, temp_id)
 
 
 async def _handle_outgoing_message(chat_list_id: int, user_type: str, statement: str) -> str:
@@ -128,8 +132,8 @@ async def get_conversation(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _get_owned_convo(db, chat_list_id, current_user)
-    return conversation_service.get_conversations(chat_list_id, db)
+    #_get_owned_convo(db, chat_list_id, current_user)
+    return await conversation_service.get_conversations(chat_list_id, db)
 
 
 @router.delete("/delete_list/{list_id}")
@@ -147,6 +151,7 @@ async def websocket_chat_endpoint(
     chat_list_id: int,
     token: str | None = None,
 ):
+    
     if not token:
         await websocket.close(code=4401)
         return
@@ -155,7 +160,6 @@ async def websocket_chat_endpoint(
     try:
         current_user = get_current_user(token,db)
         
-        #current_user = conversation_service.get_user_from_token(token, db)
         conversation_service.get_conversation_list_for_user(
             chat_list_id, current_user.id, db
         )

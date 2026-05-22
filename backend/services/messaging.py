@@ -11,6 +11,12 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from core.database import SessionLocal
 from models.conversation import Conversation
+from services.chat_cache import (
+    QueuedChatMessage,
+    drain_flush_queue,
+    enqueue_message,
+    flush_queue_size,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +68,7 @@ def bulk_insert_messages(db: Session, messages: list[QueuedChatMessage]) -> list
             user_type=msg.user_type,
             statement=msg.statement,
         )
+        
         for msg in messages
     ]
     
@@ -73,7 +80,7 @@ def bulk_insert_messages(db: Session, messages: list[QueuedChatMessage]) -> list
 
 
 async def flush_buffer_to_db() -> int:
-    batch = await _buffer.drain()
+    batch = await drain_flush_queue()
 
     if not batch:
         return 0
@@ -95,8 +102,7 @@ async def _periodic_flush() -> None:
     while True:
         await asyncio.sleep(settings.chat_flush_interval_seconds)
         try:
-            if await _buffer.size() > 0:
-                
+            if await flush_queue_size() > 0:
                 await flush_buffer_to_db()
         except Exception:
             logger.exception("Periodic chat flush failed")
@@ -125,27 +131,29 @@ async def publish_chat_message(
     if user_type not in ALLOWED_USER_TYPES:
         raise ValueError(f"user_type must be one of {ALLOWED_USER_TYPES}")
 
+    queued = QueuedChatMessage(
+        chat_id=chat_id,
+        user_type=user_type,
+        statement=statement,
+        temp_id=temp_id,
+    )
+
+    await enqueue_message(queued)
+
+    if _channel is None:
+        return
+
     payload = {
         "chat_id": chat_id,
         "user_type": user_type,
         "statement": statement,
         "temp_id": temp_id,
     }
-
-    if _channel is None:
-        await _buffer.add(
-            QueuedChatMessage(
-                chat_id=chat_id,
-                user_type=user_type,
-                statement=statement,
-                temp_id=temp_id,
-            )
-        )
-
-        return
-
     await _channel.default_exchange.publish(
-        aio_pika.Message(body=json.dumps(payload).encode(),delivery_mode=DeliveryMode.PERSISTENT),
+        aio_pika.Message(
+            body=json.dumps(payload).encode(),
+            delivery_mode=DeliveryMode.PERSISTENT,
+        ),
         routing_key=QUEUE_NAME,
     )
 
