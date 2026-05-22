@@ -188,4 +188,3 @@ async def websocket_chat_endpoint(
             )
     except WebSocketDisconnect:
         manager.disconnect(websocket, chat_list_id)
-#why in stream_system_message we have loop and checking with chunk for user-type system, and why chunk and for what it is used, btw its value is 12?
