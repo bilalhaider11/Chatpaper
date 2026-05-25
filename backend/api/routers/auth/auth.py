@@ -92,3 +92,5 @@ async def update_user(
 )
 async def delete_user(user_id: int, db: Session = Depends(get_db)):
     return auth_service.delete_user(db, user_id)
+
+

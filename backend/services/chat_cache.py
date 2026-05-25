@@ -1,0 +1,197 @@
+import json
+import logging
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+
+from core.config import settings
+from core.redis_client import get_redis
+
+logger = logging.getLogger(__name__)
+
+FLUSH_QUEUE_KEY = "chat:flush:queue"
+
+
+@dataclass
+class QueuedChatMessage:
+    chat_id: int
+    user_type: str
+    statement: str
+    temp_id: str | None = None
+    enqueued_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+def _pending_key(chat_id: int) -> str:
+    return f"chat:pending:{chat_id}"
+
+
+def _stream_key(chat_id: int, temp_id: str) -> str:
+    return f"chat:stream:{chat_id}:{temp_id}"
+
+
+def _message_to_json(message: QueuedChatMessage) -> str:
+    return json.dumps(asdict(message))
+
+
+def _message_from_json(raw: str) -> QueuedChatMessage:
+    data = json.loads(raw)
+    return QueuedChatMessage(
+        chat_id=int(data["chat_id"]),
+        user_type=data["user_type"],
+        statement=data["statement"],
+        temp_id=data.get("temp_id"),
+        enqueued_at=data.get("enqueued_at", ""),
+    )
+
+
+class InMemoryChatCache:
+    def __init__(self) -> None:
+        self._flush_queue: list[str] = []
+        self._pending: dict[int, list[str]] = {}
+        self._streams: dict[str, str] = {}
+
+    async def enqueue(self, message: QueuedChatMessage) -> None:
+        payload = _message_to_json(message)
+        self._flush_queue.append(payload)
+        self._pending.setdefault(message.chat_id, []).append(payload)
+
+    async def drain_flush_queue(self) -> list[QueuedChatMessage]:
+        payloads = self._flush_queue[:]
+        self._flush_queue.clear()
+        messages = [_message_from_json(item) for item in payloads]
+        for msg in messages:
+            serialized = _message_to_json(msg)
+            pending = self._pending.get(msg.chat_id, [])
+            if serialized in pending:
+                pending.remove(serialized)
+        return messages
+
+    async def flush_queue_size(self) -> int:
+        return len(self._flush_queue)
+
+    async def get_pending(self, chat_id: int) -> list[QueuedChatMessage]:
+        return [_message_from_json(item) for item in self._pending.get(chat_id, [])]
+
+    async def append_stream_chunk(self, chat_id: int, temp_id: str, chunk: str) -> None:
+        key = _stream_key(chat_id, temp_id)
+        
+        self._streams[key] = self._streams.get(key, "") + chunk
+
+    async def get_active_streams(self, chat_id: int) -> list[dict]:
+        prefix = f"chat:stream:{chat_id}:"
+        results: list[dict] = []
+        for key, statement in self._streams.items():
+            if not key.startswith(prefix):
+                continue
+            temp_id = key.removeprefix(prefix)
+            results.append(
+                {
+                    "temp_id": temp_id,
+                    "user_type": "system",
+                    "statement": statement,
+                    "streaming": True,
+                }
+            )
+        return results
+
+    async def clear_stream(self, chat_id: int, temp_id: str) -> None:
+        self._streams.pop(_stream_key(chat_id, temp_id), None)
+
+
+_memory_cache = InMemoryChatCache()
+
+
+async def enqueue_message(message: QueuedChatMessage) -> None:
+    redis_client = get_redis()
+    payload = _message_to_json(message)
+
+    if redis_client is None:
+        await _memory_cache.enqueue(message)
+        return
+
+    pipe = redis_client.pipeline()
+    pipe.rpush(FLUSH_QUEUE_KEY, payload)
+    pipe.expire(FLUSH_QUEUE_KEY, settings.chat_data_ttl_seconds)
+    pending_key = _pending_key(message.chat_id)
+    pipe.rpush(pending_key, payload)
+    pipe.expire(pending_key, settings.chat_data_ttl_seconds)
+    await pipe.execute()
+
+
+async def drain_flush_queue() -> list[QueuedChatMessage]:
+    redis_client = get_redis()
+    if redis_client is None:
+        return await _memory_cache.drain_flush_queue()
+
+    payloads = await redis_client.lrange(FLUSH_QUEUE_KEY, 0, -1)
+    if not payloads:
+        return []
+
+    await redis_client.delete(FLUSH_QUEUE_KEY)
+    messages = [_message_from_json(item) for item in payloads]
+
+    pipe = redis_client.pipeline()
+    for msg in messages:
+        pipe.lrem(_pending_key(msg.chat_id), 1, _message_to_json(msg))
+    await pipe.execute()
+    return messages
+
+
+async def flush_queue_size() -> int:
+    redis_client = get_redis()
+    if redis_client is None:
+        return await _memory_cache.flush_queue_size()
+    return int(await redis_client.llen(FLUSH_QUEUE_KEY))
+
+
+async def get_pending_messages(chat_id: int) -> list[QueuedChatMessage]:
+    redis_client = get_redis()
+    if redis_client is None:
+        return await _memory_cache.get_pending(chat_id)
+
+    payloads = await redis_client.lrange(_pending_key(chat_id), 0, -1)
+    return [_message_from_json(item) for item in payloads]
+
+
+async def append_stream_chunk(chat_id: int, temp_id: str, chunk: str) -> None:
+    redis_client = get_redis()
+    if redis_client is None:
+        await _memory_cache.append_stream_chunk(chat_id, temp_id, chunk)
+        return
+
+    key = _stream_key(chat_id, temp_id)
+    print("key: ",key)
+    pipe = redis_client.pipeline()
+    pipe.append(key, chunk)
+    pipe.expire(key, settings.chat_stream_ttl_seconds)
+    await pipe.execute()
+
+
+async def get_active_streams(chat_id: int) -> list[dict]:
+    redis_client = get_redis()
+    if redis_client is None:
+        return await _memory_cache.get_active_streams(chat_id)
+
+    prefix = f"chat:stream:{chat_id}:"
+    results: list[dict] = []
+    async for key in redis_client.scan_iter(match=f"{prefix}*"):
+        statement = await redis_client.get(key)
+        if not statement:
+            continue
+        temp_id = key.removeprefix(prefix)
+        results.append(
+            {
+                "temp_id": temp_id,
+                "user_type": "system",
+                "statement": statement,
+                "streaming": True,
+            }
+        )
+    return results
+
+
+async def clear_stream(chat_id: int, temp_id: str) -> None:
+    redis_client = get_redis()
+    if redis_client is None:
+        await _memory_cache.clear_stream(chat_id, temp_id)
+        return
+    await redis_client.delete(_stream_key(chat_id, temp_id))

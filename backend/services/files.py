@@ -126,3 +126,8 @@ def reingest_file(file_id: int, user_id: int, db: Session) -> dict:
     db.commit()
 
     return {"message": "Re-ingestion started", "job_id": job.id}
+
+def get_file_by_user_id(user_id, db):
+    
+    user_file = db.query(FileRecord).where(FileRecord.user_id == user_id,FileRecord.is_active == True).first();
+    return user_file

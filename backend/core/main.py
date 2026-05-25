@@ -10,11 +10,12 @@ from sqladmin import Admin
 from core.config import settings
 from core.database import engine
 from models import auth, file_model
+from core.redis_client import stop_redis,start_redis
 import models.ingestion  # noqa: F401 — registers DocumentParent, IngestionJob with Base
 import models.conversation  # noqa: F401 — registers ConversationList, Conversation with Base
 from api.router import api_router
 from .admin import UserAdmin, authentication_backend
-
+from services.messaging import start_messaging, stop_messaging
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -23,13 +24,21 @@ async def lifespan(app: FastAPI):
     cfg.set_main_option("script_location", str(_ini.parent / "alembic"))
     cfg.set_main_option("sqlalchemy.url", settings.database)
     command.upgrade(cfg, "head")
+    await start_redis()
+    await start_messaging()
     yield
+    await stop_messaging()
+    await stop_redis()
 
 
 app = FastAPI(lifespan=lifespan)
 
 # SessionMiddleware is required by sqladmin's AuthenticationBackend.
-app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
+app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, session_cookie="session",same_site="lax",https_only=False)
+
+
+
+
 
 app.add_middleware(
     CORSMiddleware,

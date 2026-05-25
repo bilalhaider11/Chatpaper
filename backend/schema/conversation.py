@@ -27,6 +27,16 @@ class ConversationListRequest(BaseModel):
 #################################### Conversation ################################################
 
 class ConversationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int | None = None
+    chat_id: int | None = None
     statement: str
     user_type: str
-    model_config = ConfigDict(from_attributes=True)
+
+
+class ChatWsSendPayload(BaseModel):
+    action: str = "send"
+    statement: str
+    user_type: str
+    

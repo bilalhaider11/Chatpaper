@@ -15,6 +15,17 @@ class Settings(BaseModel):
     algorithm: str = os.getenv("ALGORITHM", "HS256")
     database: str = os.getenv("DATABASE", "")
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    
+    chat_data_ttl_seconds:int = int(os.getenv("CHAT_DATA_TTL_SECONDS",'3600'))
+    
+    google_client_id:str = os.getenv("GOOGLE_CLIENT_ID")
+    google_client_secret:str = os.getenv("GOOGLE_CLIENT_SECRET")
+    redirect_url:str = os.getenv("REDIRECT_URL")
+    frontend_url: str = os.getenv("FRONTEND_URL")
+
+    rabbitmq_url: str = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost/")
+    chat_flush_interval_seconds: int = int(os.getenv("CHAT_FLUSH_INTERVAL_SECONDS", "3600"))
+    chat_stream_chunk_size: int = int(os.getenv("CHAT_STREAM_CHUNK_SIZE", "12"))
 
     # LLM / embeddings
     openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
