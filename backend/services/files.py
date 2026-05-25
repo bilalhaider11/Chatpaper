@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -15,7 +16,7 @@ from models.conversation import ConversationList
 from models.file_model import FileRecord
 from models.ingestion import IngestionJob
 from schema.file import UploadResponse
-from tasks.ingestion_tasks import run_ingestion
+from tasks.ingestion_tasks import cleanup_orphaned_vectors, run_ingestion
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,25 @@ def upload_files(file: UploadFile, db: Session, current_user: User, description:
         shutil.copyfileobj(file.file, buffer)
 
     file_hash = _compute_file_hash(saved_path)
+
+    # Per-user disk quota — reject before any DB work if over limit
+    if settings.max_user_storage_mb > 0:
+        used_bytes: int = (
+            db.query(func.sum(FileRecord.filesize))
+            .filter(FileRecord.user_id == current_user.id, FileRecord.is_active == True)  # noqa: E712
+            .scalar()
+        ) or 0
+        limit_bytes = settings.max_user_storage_mb * 1024 * 1024
+        if used_bytes + saved_path.stat().st_size > limit_bytes:
+            saved_path.unlink(missing_ok=True)
+            used_mb = used_bytes // (1024 * 1024)
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Storage quota exceeded. "
+                    f"You are using {used_mb} MB of {settings.max_user_storage_mb} MB allowed."
+                ),
+            )
 
     # Active duplicate — same content already live for this user
     active_dup = (
@@ -207,7 +227,9 @@ def delete_file(file_id: int, user_id: int | None, db: Session) -> dict:
     try:
         delete_vectors_for_file(file_id, record.user_id)
     except Exception:
-        logger.warning("Could not delete ChromaDB vectors for file %s; continuing with DB delete.", file_id)
+        # ChromaDB unavailable — queue a retrying background task so vectors aren't permanently orphaned
+        logger.warning("ChromaDB delete failed for file %s; queuing async cleanup.", file_id)
+        cleanup_orphaned_vectors.delay(file_id, record.user_id)
 
     filename_on_disk = Path(record.filepath).name
     disk_path = UPLOAD_DIR / filename_on_disk

@@ -4,9 +4,16 @@ import dataclasses
 import hashlib
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
+
+try:
+    import openai as _openai
+except ImportError:
+    _openai = None  # type: ignore[assignment]
+
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 try:
     from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -36,6 +43,18 @@ _TABULAR_MIMES = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-excel",
 }
+
+_rate_limit_exc = (_openai.RateLimitError,) if _openai is not None else (Exception,)
+
+
+@retry(
+    retry=retry_if_exception_type(_rate_limit_exc),
+    wait=wait_exponential(multiplier=1, min=10, max=300),
+    stop=stop_after_attempt(5),
+    reraise=True,
+)
+def _embed_with_backoff(embedder: Any, texts: list[str]) -> list[list[float]]:
+    return embedder.embed_documents(texts)
 
 
 @dataclasses.dataclass
@@ -338,7 +357,7 @@ def _stage_embed_upsert(
                 batch_ids = child_ids[batch_start: batch_start + settings.embedding_batch_size]
                 batch_metas = child_metas[batch_start: batch_start + settings.embedding_batch_size]
 
-                embeddings = embedder.embed_documents(batch_texts)
+                embeddings = _embed_with_backoff(embedder, batch_texts)
                 collection.upsert(
                     ids=batch_ids,
                     documents=batch_texts,
@@ -401,7 +420,7 @@ def _stage_summarize(
         ]
         summary = llm.invoke(reduce_msgs).content
 
-    embedding = embedder.embed_documents([summary])[0]
+    embedding = _embed_with_backoff(embedder, [summary])[0]
     collection = get_document_summaries_collection()
     collection.upsert(
         ids=[f"summary:{user_id}:{file_hash}"],
@@ -465,7 +484,7 @@ def _stage_extract_propositions(
             batch_texts = propositions[batch_start: batch_start + settings.embedding_batch_size]
             batch_ids = prop_ids[batch_start: batch_start + settings.embedding_batch_size]
             batch_metas = prop_metas[batch_start: batch_start + settings.embedding_batch_size]
-            embeddings = embedder.embed_documents(batch_texts)
+            embeddings = _embed_with_backoff(embedder, batch_texts)
             collection.upsert(ids=batch_ids, documents=batch_texts, embeddings=embeddings, metadatas=batch_metas)
 
     with ThreadPoolExecutor(max_workers=settings.proposition_extraction_concurrency) as pool:
@@ -672,3 +691,57 @@ def run_ingestion(self, job_id: int, file_id: int) -> dict[str, Any]:
         raise
     finally:
         db.close()
+
+
+@celery_app.task(name="tasks.ingestion_tasks.cleanup_stuck_jobs")
+def cleanup_stuck_jobs() -> dict:
+    """Periodic watchdog: marks ingestion jobs that have been stuck in a non-terminal state
+    longer than settings.ingestion_job_timeout_minutes as FAILED_PERMANENT."""
+    db: Session = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.ingestion_job_timeout_minutes)
+        terminal = {IngestionJob.STATUS_COMPLETE, IngestionJob.STATUS_FAILED_PERMANENT}
+        stuck = (
+            db.query(IngestionJob)
+            .filter(
+                IngestionJob.status.notin_(terminal),
+                IngestionJob.updated_at < cutoff,
+            )
+            .all()
+        )
+        if not stuck:
+            return {"marked": 0}
+
+        for job in stuck:
+            job.status = IngestionJob.STATUS_FAILED_PERMANENT
+            job.error_message = (
+                f"Job timed out after {settings.ingestion_job_timeout_minutes} minutes without progress."
+            )
+            job.error_type = "JobTimeout"
+            job.completed_at = datetime.now(timezone.utc)
+            file_rec = db.query(FileRecord).filter(FileRecord.id == job.file_id).first()
+            if file_rec:
+                file_rec.ingestion_status = IngestionJob.STATUS_FAILED_PERMANENT
+
+        db.commit()
+        logger.warning("cleanup_stuck_jobs: marked %d stuck job(s) as FAILED_PERMANENT", len(stuck))
+        return {"marked": len(stuck)}
+    finally:
+        db.close()
+
+
+@celery_app.task(
+    bind=True,
+    name="tasks.ingestion_tasks.cleanup_orphaned_vectors",
+    max_retries=10,
+    default_retry_delay=60,
+    acks_late=True,
+)
+def cleanup_orphaned_vectors(self, file_id: int, user_id: int) -> None:
+    """Retrying cleanup task queued when a synchronous ChromaDB delete fails during file deletion."""
+    try:
+        from core.chroma import delete_vectors_for_file
+        delete_vectors_for_file(file_id, user_id)
+    except Exception as exc:
+        countdown = min(60 * (2 ** self.request.retries), 3600)
+        raise self.retry(exc=exc, countdown=countdown)

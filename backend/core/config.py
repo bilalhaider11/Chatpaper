@@ -92,6 +92,15 @@ class Settings(BaseModel):
     chat_history_turns: int = int(os.getenv("CHAT_HISTORY_TURNS", "6"))
     chat_history_max_chars: int = int(os.getenv("CHAT_HISTORY_MAX_CHARS", "8000"))
 
+    # per-user storage quota; 0 = unlimited
+    max_user_storage_mb: int = int(os.getenv("MAX_USER_STORAGE_MB", "0"))
+
+    # ingestion job watchdog — jobs stuck longer than this are marked FAILED_PERMANENT
+    ingestion_job_timeout_minutes: int = int(os.getenv("INGESTION_JOB_TIMEOUT_MINUTES", "30"))
+
+    # max tokens to inject as document context into the chat prompt (leaves headroom for history + response)
+    chat_max_context_tokens: int = int(os.getenv("CHAT_MAX_CONTEXT_TOKENS", "8000"))
+
     # CORS — comma-separated list read from env
     cors_allowed_origins: list[str] = [
         o.strip()

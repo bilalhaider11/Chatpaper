@@ -12,6 +12,11 @@ from schema.chat import AskRequest, AskResponse, Citation
 from services.retrieval import RetrievedContext, retrieve
 
 try:
+    import tiktoken as _tiktoken
+except ImportError:
+    _tiktoken = None  # type: ignore[assignment]
+
+try:
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 except ImportError:
     AIMessage = None  # type: ignore[assignment,misc]
@@ -24,6 +29,27 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 _CITATION_RE = re.compile(r"\[(\d+)\]")
 
+_PROMPT_HEADER = (
+    "You are a research assistant. Answer using ONLY the document context below. "
+    "Cite sources with [N] notation matching the context numbers. "
+    "If the answer is not in the context, say so — do not fabricate.\n\n"
+    "Document context:\n\n"
+)
+_PROMPT_HEADER_NO_CTX = (
+    "You are a research assistant. "
+    "No relevant document context was found for this query."
+)
+
+
+def _count_tokens(text: str) -> int:
+    if _tiktoken is None:
+        return len(text) // 4  # rough fallback: ~4 chars per token
+    try:
+        enc = _tiktoken.encoding_for_model(settings.openai_chat_model)
+    except KeyError:
+        enc = _tiktoken.get_encoding("o200k_base")
+    return len(enc.encode(text))
+
 
 def _context_block(ctx: RetrievedContext, index: int) -> str:
     pages = f"pages {ctx.page_start}–{ctx.page_end}" if ctx.page_start else "page unknown"
@@ -32,17 +58,24 @@ def _context_block(ctx: RetrievedContext, index: int) -> str:
 
 def _system_prompt(contexts: list[RetrievedContext]) -> str:
     if not contexts:
-        return (
-            "You are a research assistant. "
-            "No relevant document context was found for this query."
-        )
-    context_text = "\n\n---\n\n".join(_context_block(c, i + 1) for i, c in enumerate(contexts))
-    return (
-        "You are a research assistant. Answer using ONLY the document context below. "
-        "Cite sources with [N] notation matching the context numbers. "
-        "If the answer is not in the context, say so — do not fabricate.\n\n"
-        f"Document context:\n\n{context_text}"
-    )
+        return _PROMPT_HEADER_NO_CTX
+
+    budget = settings.chat_max_context_tokens - _count_tokens(_PROMPT_HEADER)
+    selected: list[str] = []
+    used = 0
+    for i, ctx in enumerate(contexts):
+        block = _context_block(ctx, i + 1)
+        tokens = _count_tokens(block)
+        if used + tokens > budget:
+            break
+        selected.append(block)
+        used += tokens
+
+    # Always include at least the top context even if it alone exceeds the budget.
+    if not selected:
+        selected = [_context_block(contexts[0], 1)]
+
+    return _PROMPT_HEADER + "\n\n---\n\n".join(selected)
 
 
 def _truncate_history(history: list, max_chars: int) -> list:
