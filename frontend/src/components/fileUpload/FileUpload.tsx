@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import FileUploadButton from "./FileUploadButton";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useDropzone } from "react-dropzone";
+
+import { ACCEPTED_FILE_TYPES } from "../../services/file_config";
 import {
   deleteFile,
   FileRecord,
@@ -7,11 +9,13 @@ import {
   toFileUrl,
   uploadFile,
 } from "../../services/files_api";
+import FilePreview from "./FilePreview";
 import "./FileUpload.css";
 
 type FileUploadProps = {
   variant?: "embedded" | "modal";
   onClose?: () => void;
+  onUploadSuccess?: () => Promise<void> | void;
   showFileList?: boolean;
   subtitle?: string;
 };
@@ -19,14 +23,17 @@ type FileUploadProps = {
 function FileUpload({
   variant = "embedded",
   onClose,
+  onUploadSuccess,
   showFileList = false,
   subtitle = "Choose a document to start secure processing.",
 }: FileUploadProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
+  const uploadInFlightRef = useRef(false);
 
   const loadFiles = async () => {
     const fileList = await getFiles();
@@ -39,18 +46,61 @@ function FileUpload({
     }
   }, [showFileList]);
 
+  useEffect(() => {
+    if (!selectedFile) {
+      setPreviewUrl(null);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(selectedFile);
+    setPreviewUrl(objectUrl);
+
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedFile]);
+
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    setSelectedFile(acceptedFiles[0] ?? null);
+    setMessage("");
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    multiple: true,
+    accept: ACCEPTED_FILE_TYPES,
+  });
+
   const handleUpload = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || uploadInFlightRef.current) return;
+
+    uploadInFlightRef.current = true;
     setUploading(true);
     setMessage("");
+
+    let uploaded = false;
+
     try {
       await uploadFile(selectedFile, description);
+      uploaded = true;
+      setMessage("File uploaded successfully.");
       setSelectedFile(null);
       setDescription("");
-      setMessage("File uploaded successfully.");
-      if (showFileList) {
-        await loadFiles();
-      }
+    } catch {
+      setMessage("Failed to upload file.");
+    } finally {
+      uploadInFlightRef.current = false;
+      setUploading(false);
+    }
+
+    if (!uploaded) return;
+
+    if (showFileList) {
+      void loadFiles();
+    }
+
+    try {
+      await onUploadSuccess?.();
       if (variant === "modal") {
         onClose?.();
       }
@@ -68,32 +118,32 @@ function FileUpload({
 
   const card = (
     <div className="upload-card">
-      {variant === "modal" ? (
-        <div className="upload-card-header">
-          <h2 id="upload-dialog-title" className="upload-card-title">
-            Upload your file
-          </h2>
-          <button
-            type="button"
-            className="upload-modal-close"
-            onClick={onClose}
-            aria-label="Close upload dialog"
-          >
-            ×
-          </button>
-        </div>
-      ) : (
-        <h2 className="upload-card-title">Upload your file</h2>
-      )}
+      <h2 className="upload-card-title">Upload your file</h2>
 
       <p className="upload-card-subtitle">{subtitle}</p>
 
-      <FileUploadButton onFileSelect={setSelectedFile} />
+      <div {...getRootProps()} className="dropzone">
+        <input {...getInputProps()} />
 
-      {selectedFile ? (
+        {isDragActive ? (
+          <p>Drop the file here...</p>
+        ) : (
+          <p>Drag & drop file here, or click to select</p>
+        )}
+      </div>
+
+      {selectedFile && (
         <p className="selected-file">
-          Selected file: <strong>{selectedFile.name}</strong>
+          Selected: <strong>{selectedFile.name}</strong>
         </p>
+      )}
+
+      {previewUrl && selectedFile ? (
+        <FilePreview
+          fileUrl={previewUrl}
+          fileType={selectedFile.type}
+          fileName={selectedFile.name}
+        />
       ) : null}
 
       <input
@@ -102,6 +152,7 @@ function FileUpload({
         placeholder="Description (optional)"
         value={description}
         onChange={(event) => setDescription(event.target.value)}
+        disabled={uploading}
       />
 
       <button
@@ -113,29 +164,36 @@ function FileUpload({
         {uploading ? "Uploading..." : "Upload"}
       </button>
 
-      {message ? <p className="upload-message">{message}</p> : null}
+      {message && <p className="upload-message">{message}</p>}
 
-      {showFileList ? (
+      {showFileList && (
         <div className="file-list">
           <h3>Files</h3>
           {files.length === 0 ? (
-            <p className="upload-card-subtitle">No files uploaded yet.</p>
+            <p>No files uploaded.</p>
           ) : (
             files.map((file) => (
               <div key={file.id} className="file-row">
-                <a href={toFileUrl(file.filepath)} target="_blank" rel="noreferrer">
+                <a
+                  href={toFileUrl(file.filepath)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   {file.filename}
                 </a>
                 <span>{Math.round(file.filesize / 1024)} KB</span>
-                <span>{file.is_active ? "Active" : "Inactive"}</span>
-                <button type="button" onClick={() => void handleDelete(file.id)}>
+
+                <button
+                  type="button"
+                  onClick={() => void handleDelete(file.id)}
+                >
                   Delete
                 </button>
               </div>
             ))
           )}
         </div>
-      ) : null}
+      )}
     </div>
   );
 
@@ -144,10 +202,7 @@ function FileUpload({
       <div className="upload-modal-overlay" onClick={onClose}>
         <div
           className="upload-modal-panel"
-          onClick={(event) => event.stopPropagation()}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="upload-dialog-title"
+          onClick={(e) => e.stopPropagation()}
         >
           {card}
         </div>

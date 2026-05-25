@@ -22,10 +22,9 @@ class Settings(BaseModel):
     google_client_secret:str = os.getenv("GOOGLE_CLIENT_SECRET")
     redirect_url:str = os.getenv("REDIRECT_URL")
     frontend_url: str = os.getenv("FRONTEND_URL")
-    jwt_secret_key:str = os.getenv("JWT_SECRET_KEY")
 
     rabbitmq_url: str = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost/")
-    chat_flush_interval_seconds: int = int(os.getenv("CHAT_FLUSH_INTERVAL_SECONDS", "50"))
+    chat_flush_interval_seconds: int = int(os.getenv("CHAT_FLUSH_INTERVAL_SECONDS", "3600"))
     chat_stream_chunk_size: int = int(os.getenv("CHAT_STREAM_CHUNK_SIZE", "12"))
 
     # LLM / embeddings

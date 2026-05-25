@@ -6,6 +6,7 @@ import SystemMessageModal from "../../components/chatbot/SystemMessageModal";
 import FileUpload from "../../components/fileUpload/FileUpload";
 import { DeleteIcon, EditIcon } from "../../components/icons/ActionIcons";
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
+import { getFiles } from "../../services/files_api";
 import {
   ChatWsEvent,
   Conversation,
@@ -32,6 +33,7 @@ function Chatbot() {
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(
     null
   );
+  const [hasUploadedFile, setHasUploadedFile] = useState(false);
   const [messages, setMessages] = useState<Conversation[]>([]);
   const [liveMessages, setLiveMessages] = useState<LiveMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -155,10 +157,13 @@ function Chatbot() {
         setUser(currentUser);
         const list = await loadConversationList();
         if (list.length > 0) {
+          setHasUploadedFile(true);
           setisopen(false);
           setSelectedConversationId(list[0].id);
           await loadMessages(list[0].id);
         } else {
+          const files = await getFiles();
+          setHasUploadedFile(files.length > 0);
           setisopen(true);
         }
       } catch {
@@ -182,6 +187,11 @@ function Chatbot() {
   };
 
   const handleStartChat = async () => {
+    if (!hasUploadedFile) {
+      setisopen(true);
+      return;
+    }
+
     setCreatingChat(true);
     try {
       const newConversation = await createConversationList();
@@ -204,6 +214,10 @@ function Chatbot() {
     let conversationListId = selectedConversationId;
 
     if (!conversationListId) {
+      if (!hasUploadedFile) {
+        setisopen(true);
+        return;
+      }
       setCreatingChat(true);
       try {
         const newConversation = await createConversationList();
@@ -257,7 +271,9 @@ function Chatbot() {
       } else {
         setMessages([]);
         setLiveMessages([]);
-        setisopen(true);
+        const files = await getFiles();
+        setHasUploadedFile(files.length > 0);
+        setisopen(files.length === 0);
       }
     }
   };
@@ -265,6 +281,23 @@ function Chatbot() {
   const handleStartEdit = (conversation: ConversationListItem) => {
     setEditingId(conversation.id);
     setEditTitle(conversation.conversation_title || "New chat");
+  };
+
+  const handleUploadSuccess = async () => {
+    try {
+      setHasUploadedFile(true);
+      const list = await loadConversationList();
+      if (list.length > 0) {
+        setSelectedConversationId(list[0].id);
+        setMessages([]);
+        setLiveMessages([]);
+        await loadMessages(list[0].id);
+        setisopen(false);
+      }
+    } catch (error) {
+      console.error("Failed to start chat after upload:", error);
+      throw error;
+    }
   };
 
   const handleSaveEdit = async (e: React.FormEvent, id: number) => {
@@ -412,6 +445,7 @@ function Chatbot() {
             <FileUpload
               variant="modal"
               onClose={() => setisopen(false)}
+              onUploadSuccess={handleUploadSuccess}
               subtitle="Upload a document to use with this chat session."
             />
           ) : null}
@@ -436,9 +470,8 @@ function Chatbot() {
             displayedMessages.map((message) => (
               <div
                 key={message.key}
-                className={`chat-msg ${message.user_type === "user" ? "user" : "system"}${
-                  message.streaming ? " streaming" : ""
-                }`}
+                className={`chat-msg ${message.user_type === "user" ? "user" : "system"}${message.streaming ? " streaming" : ""
+                  }`}
               >
                 <div className="chat-msg-label">
                   {message.user_type === "user" ? "You" : "System"}

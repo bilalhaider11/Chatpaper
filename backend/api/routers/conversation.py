@@ -1,7 +1,7 @@
 import asyncio
 import json
 from uuid import uuid4
-
+from services.files import get_file_by_user_id
 from fastapi import APIRouter, Body, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from services.chat_cache import append_stream_chunk, clear_stream
@@ -104,16 +104,34 @@ async def update_conversation_title(
     return conversation_service.update_conversation_title(title, conversation_id, db)
 
 
-@router.get("/get_conversation_list", response_model=list[ConversationListResponse])
+@router.get(
+    "/get_conversation_list",
+    response_model=list[ConversationListResponse],
+)
 async def get_conversation_list(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    q = db.query(ConversationList).where(ConversationList.is_active == True)
-    if current_user.role != UserRole.admin:
-        q = q.where(ConversationList.user_id == current_user.id)
-    return q.all()
+    conversations = (
+        db.query(ConversationList)
+        .filter(
+            ConversationList.is_active == True,
+            ConversationList.user_id == current_user.id,
+        )
+        .all()
+    )
+    if conversations:
+        return conversations
 
+    user_file = get_file_by_user_id(current_user.id, db)
+    if not user_file:
+        return []
+
+    conversation = conversation_service.create_conversation_list(
+        current_user,
+        db,
+    )
+    return [conversation]        
 
 @router.post("/conversation/{chat_id}", response_model=ConversationResponse)
 async def conversation(

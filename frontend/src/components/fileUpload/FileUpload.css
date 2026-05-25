@@ -171,3 +171,65 @@
         border-bottom: 1px solid rgba(148, 163, 184, 0.15);
     }
 }
+
+.dropzone {
+    border: 2px dashed #999;
+    border-radius: 10px;
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: 0.2s ease;
+    color: #e2e8f0
+}
+
+.dropzone:hover {
+    border-color: #444;
+}
+
+.dropzone {
+    border: 2px dashed #999;
+    border-radius: 12px;
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.dropzone:hover {
+    border-color: #555;
+}
+
+.file-preview {
+    margin-top: 20px;
+    max-height: 500px;
+    overflow: auto;
+}
+
+.file-preview-image {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+}
+
+.file-preview-frame {
+    width: 100%;
+    min-height: 360px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+.file-preview-text {
+    margin: 0;
+    padding: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #f7f7f7;
+    border-radius: 8px;
+    font-size: 0.875rem;
+}
+
+.file-preview-fallback {
+    margin: 0;
+    color: #555;
+}
