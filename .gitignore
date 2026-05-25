@@ -7,6 +7,10 @@ backend/.venv/
 backend/.env
 backend/*.db
 
+# ChromaDB — generated vector store; never commit
+chroma-data/
+
+
 # Node
 frontend/node_modules/
 frontend/dist/

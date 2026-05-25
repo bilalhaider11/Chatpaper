@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from core import dependencies
 from core.config import settings
-from models.auth import User
+from models.auth import User, UserRole
 from services import auth
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -57,3 +57,9 @@ def get_current_user(
         return user
     except JWTError:
         raise credentials_exception
+
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != UserRole.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required.")
+    return current_user

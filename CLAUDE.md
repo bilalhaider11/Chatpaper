@@ -27,16 +27,33 @@
 
 ## Planning Before Implementation
 
-For every non-trivial change, follow this process **before writing a single line of code**:
+For every non-trivial change, produce this full plan **before writing a single line of code** and
+**wait for explicit user approval** before implementing:
 
-1. **Understand the problem** — restate what needs to be solved and why.
-2. **Generate multiple solutions** — propose at least 2-3 distinct approaches.
-3. **Rank the solutions** — evaluate each on simplicity, correctness, maintainability, and fit with the existing codebase.
-4. **Stress-test the winner** — enumerate edge cases, failure modes, and interactions with other parts of the system.
-5. **If a problem is found** — go back to step 2 with a new candidate; repeat until the plan is clean.
-6. **Only then implement** — follow the agreed plan without scope creep.
+1. **Problem statement** — one paragraph: what needs to be solved, why, and what the success
+   condition looks like.
 
-Present the plan to the user and wait for approval before implementing.
+2. **Approaches** — at least 2–3 distinct options. For each: name, one-sentence description,
+   key trade-offs.
+
+3. **Ranking table** — score each option 1–10 on: simplicity, correctness, maintainability,
+   fit with existing codebase. State the winner and why.
+
+4. **Step-by-step implementation plan** — for the winning approach only. Each step must
+   include: file path, what changes, and why.
+
+5. **Edge cases & failure modes table** — columns: scenario | risk | mitigation. Cover at
+   minimum: concurrent operations, missing/deleted dependencies, pre-existing data
+   (migration safety), security boundaries, and partial failure states.
+
+6. **Test scenarios table** — columns: # | what to test | expected result. Must include
+   happy path, each edge case from step 5, and at least one security/tenancy check.
+
+7. **Overall plan rating** — score out of 10 with a one-sentence justification and any
+   remaining risk.
+
+If any step reveals a flaw in the chosen approach, return to step 2 before continuing.
+Do not implement anything until the user explicitly approves the plan.
 
 ## General Guardrails
 - Match the scope of changes to what was actually requested — no opportunistic refactors or unrelated cleanup.
@@ -71,3 +88,9 @@ Present the plan to the user and wait for approval before implementing.
 - Every new service module or endpoint must have a corresponding test file under `backend/tests/`.
 - Tests should cover the happy path and at least one failure/edge case per function.
 - Do not mock the database in integration tests — use a real test database to catch migration and query issues that mocks would hide.
+
+### Post-Implementation Verification (mandatory)
+- After every non-trivial implementation, run the app and exercise the changed code paths end-to-end via the actual HTTP API before declaring the task complete.
+- This means: start the server, send real requests, capture real responses — not just syntax-checking or running unit tests.
+- If the server is already running, use it; do not restart it unless the change requires it.
+- A task is **not done** until at least the happy path and one failure/edge case have been observed at the API surface.

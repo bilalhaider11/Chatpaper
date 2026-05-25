@@ -19,7 +19,12 @@ from core.websocket import manager
 from core.dependencies import get_db
 from models.auth import User, UserRole
 from models.conversation import ConversationList
-from schema.conversation import ConversationListBase, ConversationListResponse, ConversationResponse
+from schema.conversation import (
+    ConversationCreateRequest,
+    ConversationListBase,
+    ConversationListResponse,
+    ConversationResponse,
+)
 from services import conversation as conversation_service
 from services.messaging import (
     USER_TYPE_SYSTEM,
@@ -87,10 +92,23 @@ def _get_owned_convo(db: Session, convo_id: int, user: User) -> ConversationList
 
 @router.post("/inconversationlist", response_model=ConversationListResponse)
 async def conversation_list(
+    body: ConversationCreateRequest | None = Body(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return conversation_service.create_conversation_list(current_user, db)
+    if body is None:
+        body = ConversationCreateRequest()
+    return conversation_service.create_conversation_list(current_user, body, db)
+
+
+@router.delete("/{conversation_id}")
+async def delete_conversation(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _get_owned_convo(db, conversation_id, current_user)
+    return conversation_service.delete_conversation(conversation_id, db)
 
 
 @router.patch("/conversation-title/{conversation_id}")

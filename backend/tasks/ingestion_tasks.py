@@ -288,7 +288,8 @@ def _stage_embed_upsert(
     collection = get_child_chunks_collection()
 
     for parent, children in parents_with_children:
-        parent_id = hashlib.sha256(f"{file_hash}:{parent.chunk_index}".encode()).hexdigest()
+        # user_id prefix ensures IDs are globally unique per user, preventing cross-user upsert collisions
+        parent_id = hashlib.sha256(f"{user_id}:{file_hash}:{parent.chunk_index}".encode()).hexdigest()
 
         # resume from last uncommitted parent on retry
         existing = (
@@ -403,7 +404,7 @@ def _stage_summarize(
     embedding = embedder.embed_documents([summary])[0]
     collection = get_document_summaries_collection()
     collection.upsert(
-        ids=[f"summary:{file_hash}"],
+        ids=[f"summary:{user_id}:{file_hash}"],
         documents=[summary],
         embeddings=[embedding],
         metadatas=[{
@@ -549,7 +550,8 @@ def run_ingestion(self, job_id: int, file_id: int) -> dict[str, Any]:
 
         # Stage 2 — Hash / dedup
         _set_stage(job, db, 2)
-        file_hash = _stage_hash(file_path)
+        # reuse hash computed at upload time if available; avoids reading the full file twice
+        file_hash = file_record.file_hash or _stage_hash(file_path)
         job.file_hash = file_hash
         job.file_size_bytes = file_path.stat().st_size
         file_record.file_hash = file_hash
@@ -563,6 +565,7 @@ def run_ingestion(self, job_id: int, file_id: int) -> dict[str, Any]:
         db.commit()
 
         # same content uploaded again under a different name — skip re-embedding
+        # is_active=True ensures soft-deleted records don't trigger a false dedup
         duplicate = (
             db.query(FileRecord)
             .filter(
@@ -570,6 +573,7 @@ def run_ingestion(self, job_id: int, file_id: int) -> dict[str, Any]:
                 FileRecord.file_hash == file_hash,
                 FileRecord.id != file_id,
                 FileRecord.ingestion_status == IngestionJob.STATUS_COMPLETE,
+                FileRecord.is_active == True,
             )
             .first()
         )

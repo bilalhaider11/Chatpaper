@@ -51,8 +51,8 @@ def get_propositions_collection() -> Collection:
     return _propositions_col
 
 
-def delete_vectors_for_file(file_id: int) -> None:
-    where = {"file_id": file_id}
+def delete_vectors_for_file(file_id: int, user_id: int) -> None:
+    where = {"$and": [{"file_id": file_id}, {"user_id": user_id}]}
     get_child_chunks_collection().delete(where=where)
     get_document_summaries_collection().delete(where=where)
     get_propositions_collection().delete(where=where)

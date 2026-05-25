@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from starlette.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from core.auth import get_current_user
+from core.auth import get_current_user, require_admin
 from core.config import settings
 from core.dependencies import get_db
 from models.auth import User, UserRole
 from models.file_model import FileRecord
 from models.ingestion import IngestionJob
-from schema.file import FileRecordResponse, FileRecordUpdate, IngestionStatusResponse
+from schema.file import FileRecordResponse, IngestionStatusResponse, UploadResponse
 from services import files
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -20,12 +20,14 @@ _MAX_BYTES = settings.max_file_size_mb * 1024 * 1024
 
 def _get_owned_file(db: Session, file_id: int, user: User) -> FileRecord:
     record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
-    if record is None or (user.role != UserRole.admin and record.user_id != user.id):
+    if record is None or (
+        user.role != UserRole.admin and (record.user_id != user.id or not record.is_active)
+    ):
         raise HTTPException(status_code=404, detail="File not found")
     return record
 
 
-@router.post("/upload", response_model=FileRecordResponse)
+@router.post("/upload", response_model=UploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
     description: str | None = Form(default=None),
@@ -81,7 +83,7 @@ async def list_files(
 ):
     q = db.query(FileRecord).order_by(FileRecord.id.desc())
     if current_user.role != UserRole.admin:
-        q = q.filter(FileRecord.user_id == current_user.id)
+        q = q.filter(FileRecord.user_id == current_user.id, FileRecord.is_active == True)
     return q.all()
 
 
@@ -140,7 +142,7 @@ async def reingest_file(
 async def delete_file(
     file_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     record = _get_owned_file(db, file_id, current_user)
     return files.delete_file(file_id, record.user_id, db)

@@ -20,5 +20,7 @@ class ConversationList(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime(timezone=False), server_default=func.now(), nullable=False)
 
-    conversation_title= Column("conversation_title", String(150), nullable=False)
+    conversation_title = Column("conversation_title", String(150), nullable=False)
     is_active = Column("is_Active", Boolean, nullable=False, default=True)
+    conversation_type = Column(String(20), nullable=False, default="global")
+    file_id = Column(Integer, ForeignKey("files_data.id", ondelete="CASCADE"), nullable=True)

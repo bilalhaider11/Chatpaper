@@ -95,11 +95,20 @@ async def ask(
         prior_context = " ".join(prior_assistant_turns)
         retrieval_query = f"[Prior context: {prior_context}] {body.question}"
 
+    # Derive file scope from the conversation type — client cannot override this
+    match convo.conversation_type:
+        case "per_file":
+            if convo.file_id is None:
+                raise HTTPException(status_code=422, detail="Associated file no longer exists.")
+            file_ids = [convo.file_id]
+        case _:  # global
+            file_ids = None
+
     contexts = retrieve(
         query=retrieval_query,
         user_id=convo.user_id,
         db=db,
-        file_ids=body.file_ids,
+        file_ids=file_ids,
         top_k=body.top_k,
         use_summary_routing=body.use_summary_routing,
         use_bm25=body.use_bm25,
