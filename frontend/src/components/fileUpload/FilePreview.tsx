@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import "./FileUpload.css";
 
 type PreviewKind = "image" | "pdf" | "text" | "unsupported";
 
@@ -62,10 +61,14 @@ function TextFilePreview({ fileUrl }: { fileUrl: string }) {
   }, [fileUrl]);
 
   if (error) {
-    return <p className="file-preview-fallback">{content}</p>;
+    return <p className="m-0 text-slate-500">{content}</p>;
   }
 
-  return <pre className="file-preview-text">{content}</pre>;
+  return (
+    <pre className="m-0 whitespace-pre-wrap break-words rounded-lg bg-slate-100 p-3 text-sm text-slate-800">
+      {content}
+    </pre>
+  );
 }
 
 function FilePreview({ fileUrl, fileType = "", fileName = "" }: FilePreviewProps) {
@@ -73,19 +76,23 @@ function FilePreview({ fileUrl, fileType = "", fileName = "" }: FilePreviewProps
 
   if (kind === "image") {
     return (
-      <div className="file-preview">
-        <img src={fileUrl} alt={fileName || "Preview"} className="file-preview-image" />
+      <div className="mt-5 max-h-[500px] overflow-auto">
+        <img
+          src={fileUrl}
+          alt={fileName || "Preview"}
+          className="block h-auto max-w-full rounded-lg"
+        />
       </div>
     );
   }
 
   if (kind === "pdf") {
     return (
-      <div className="file-preview">
+      <div className="mt-5 max-h-[500px] overflow-auto">
         <iframe
           src={fileUrl}
           title={fileName || "PDF preview"}
-          className="file-preview-frame"
+          className="min-h-[360px] w-full rounded-lg border border-slate-300"
         />
       </div>
     );
@@ -93,17 +100,22 @@ function FilePreview({ fileUrl, fileType = "", fileName = "" }: FilePreviewProps
 
   if (kind === "text") {
     return (
-      <div className="file-preview">
+      <div className="mt-5 max-h-[500px] overflow-auto">
         <TextFilePreview fileUrl={fileUrl} />
       </div>
     );
   }
 
   return (
-    <div className="file-preview">
-      <p className="file-preview-fallback">
+    <div className="mt-5 max-h-[500px] overflow-auto">
+      <p className="m-0 text-slate-500">
         Preview is not available for this file type.{" "}
-        <a href={fileUrl} target="_blank" rel="noreferrer">
+        <a
+          href={fileUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="text-blue-400 hover:underline"
+        >
           Open file
         </a>
       </p>

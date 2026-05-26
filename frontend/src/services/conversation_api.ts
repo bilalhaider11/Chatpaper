@@ -1,4 +1,4 @@
-import { api, API_BASE_URL, tokenStore } from "../api/axios";
+import { api, apiOrigin, tokenStore } from "../api/axios";
 
 export type Conversation = {
   id: number;
@@ -56,7 +56,7 @@ export type LiveMessage = {
 };
 
 export function getChatWebSocketUrl(chatListId: number) {
-  const wsBase = API_BASE_URL.replace(/^http/, "ws").replace(/\/api$/, "");
+  const wsBase = apiOrigin().replace(/^http/, "ws");
   const token = tokenStore.getToken();
   return `${wsBase}/api/conversation/ws/${chatListId}?token=${encodeURIComponent(token ?? "")}`;
 }

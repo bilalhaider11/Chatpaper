@@ -30,14 +30,25 @@ oauth.register(
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _callback_redirect_uri(request: Request) -> str:
-    
-    return str(request.url_for("google_callback"))
+def _google_callback_url(request: Request) -> str:
+    """OAuth redirect URI registered in Google Cloud Console."""
+    configured = (settings.redirect_url or "").strip()
+    if configured.endswith(""):
+        return configured
+    if configured:
+        return f"{configured.rstrip('/')}"
+    return str(request.url_for(""))
 
 
 @router.get("/google-login")
 async def google_login(request: Request):
-    redirect_uri = _callback_redirect_uri(request)
+    if not settings.google_client_id or not settings.google_client_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Google sign-in is not configured (set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET).",
+        )
+
+    redirect_uri = _google_callback_url(request)
     request.session["oauth_redirect_uri"] = redirect_uri
     request.session["login_redirect"] = settings.frontend_url
     return await oauth.google.authorize_redirect(

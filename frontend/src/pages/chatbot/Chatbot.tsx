@@ -1,4 +1,3 @@
-import "./Chatbot.css";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
@@ -19,6 +18,9 @@ import {
   deleteConversationList,
   editConversationListTitle,
 } from "../../services/conversation_api";
+
+const sidebarBtnClass =
+  "w-full cursor-pointer rounded-[10px] border border-white/10 bg-transparent px-3 py-2.5 text-[0.95rem] text-[#ececec] transition-colors hover:bg-blue-900/10 disabled:cursor-not-allowed disabled:opacity-60";
 
 function Chatbot() {
   const [editingId, setEditingId] = useState(0);
@@ -320,7 +322,11 @@ function Chatbot() {
   };
 
   if (loading) {
-    return <div className="chatbot-loading">Loading...</div>;
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#162438] text-[#ececec]">
+        Loading...
+      </div>
+    );
   }
 
   const activeConversation = conversations.find(
@@ -328,12 +334,12 @@ function Chatbot() {
   );
 
   return (
-    <div className="chatbot-page">
-      <aside className="chatbot-sidebar">
-        <div className="sidebar-top">
+    <div className="grid min-h-screen bg-[#1a1b27] text-[#ececec] md:grid-cols-[260px_1fr]">
+      <aside className="hidden min-h-screen flex-col border-r border-white/10 bg-[#1b2338] p-3 md:flex">
+        <div className="mb-3">
           <button
             type="button"
-            className="new-chat-btn"
+            className={sidebarBtnClass}
             onClick={() => void handleStartChat()}
             disabled={creatingChat}
           >
@@ -341,98 +347,124 @@ function Chatbot() {
           </button>
         </div>
 
-        <div className="sidebar-section-label">Conversations</div>
+        <div className="px-2.5 pb-1.5 pt-2 text-xs uppercase tracking-wider text-[#8e8ea0]">
+          Conversations
+        </div>
 
-        <nav className="conversation-list">
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto pr-0.5">
           {conversations.length === 0 ? (
-            <p className="sidebar-empty">No conversations yet. Start a new chat.</p>
+            <p className="m-0 px-2.5 py-2.5 text-sm text-[#8e8ea0]">
+              No conversations yet. Start a new chat.
+            </p>
           ) : (
-            conversations.map((conversation) => (
-              <button
-                key={conversation.id}
-                type="button"
-                className={`conversation-item${conversation.id === selectedConversationId ? " active" : ""}`}
-                onClick={() => void handleSelectConversation(conversation.id)}
-              >
-                {editingId === conversation.id ? (
-                  <form
-                    onSubmit={(e) => handleSaveEdit(e, conversation.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="edit-form"
-                  >
-                    <input
-                      type="text"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      autoFocus
-                      className="edit-input"
-                    />
-                    <button type="submit">Save</button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingId(0);
-                      }}
+            conversations.map((conversation) => {
+              const isActive = conversation.id === selectedConversationId;
+              return (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  className={`flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] border-0 px-3 py-2.5 text-left transition-colors ${
+                    isActive
+                      ? "bg-blue-300/10"
+                      : "bg-transparent hover:bg-sky-200/10"
+                  }`}
+                  onClick={() => void handleSelectConversation(conversation.id)}
+                >
+                  {editingId === conversation.id ? (
+                    <form
+                      onSubmit={(e) => handleSaveEdit(e, conversation.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex w-full items-center gap-1.5"
                     >
-                      Cancel
-                    </button>
-                  </form>
-                ) : (
-                  <>
-                    <span className="conversation-title">
-                      {conversation.conversation_title || "New chat"}
-                    </span>
-                    <div className="conversation-actions">
+                      <input
+                        type="text"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        autoFocus
+                        className="min-w-0 flex-1 rounded-md border border-white/15 bg-[#2f2f2f] px-2 py-1 text-sm text-[#ececec] outline-none"
+                      />
                       <button
-                        type="button"
-                        className="conversation-icon-btn edit"
-                        aria-label="Edit conversation title"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleStartEdit(conversation);
-                        }}
+                        type="submit"
+                        className="cursor-pointer rounded-md border border-white/10 bg-transparent px-2 py-1 text-xs text-[#ececec]"
                       >
-                        <EditIcon />
+                        Save
                       </button>
                       <button
                         type="button"
-                        className="conversation-icon-btn delete"
-                        aria-label="Delete conversation"
+                        className="cursor-pointer rounded-md border border-white/10 bg-transparent px-2 py-1 text-xs text-[#ececec]"
                         onClick={(e) => {
                           e.stopPropagation();
-                          void handleDelete(conversation.id);
+                          setEditingId(0);
                         }}
                       >
-                        <DeleteIcon />
+                        Cancel
                       </button>
-                    </div>
-                  </>
-                )}
-              </button>
-            ))
+                    </form>
+                  ) : (
+                    <>
+                      <span className="min-w-0 flex-1 truncate text-sm">
+                        {conversation.conversation_title || "New chat"}
+                      </span>
+                      <div className="ml-auto flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-[#6994e6] hover:bg-white/10 hover:text-[#93b4f5]"
+                          aria-label="Edit conversation title"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStartEdit(conversation);
+                          }}
+                        >
+                          <EditIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-[#e57373] hover:bg-white/10 hover:text-[#ef9a9a]"
+                          aria-label="Delete conversation"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDelete(conversation.id);
+                          }}
+                        >
+                          <DeleteIcon />
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </button>
+              );
+            })
           )}
         </nav>
 
-        <div className="sidebar-footer">
-          <Link to="/" className="sidebar-link">
+        <div className="mt-3 flex flex-col gap-2 border-t border-sky-700/10 pt-3">
+          <Link
+            to="/"
+            className="rounded-lg px-2.5 py-2 text-left text-sm text-[#c5c5d2] no-underline hover:bg-white/10"
+          >
             Home
           </Link>
-          <button type="button" className="sidebar-logout" onClick={logout}>
+          <button
+            type="button"
+            className="cursor-pointer rounded-lg border-0 bg-transparent px-2.5 py-2 text-left text-sm text-[#c5c5d2] hover:bg-white/10"
+            onClick={logout}
+          >
             Logout
           </button>
         </div>
       </aside>
 
-      <main className="chatbot-main">
-        <header className="chatbot-header">
+      <main className="grid min-h-screen grid-rows-[auto_1fr_auto]">
+        <header className="flex items-center justify-between gap-4 border-b border-white/10 px-6 py-4">
           <div>
-            <h1>{activeConversation?.conversation_title ?? "Assistant"}</h1>
-            <span>{user?.email}</span>
+            <h1 className="m-0 text-[1.05rem] font-semibold">
+              {activeConversation?.conversation_title ?? "Assistant"}
+            </h1>
+            <span className="text-sm text-[#8e8ea0]">{user?.email}</span>
           </div>
           <button
             type="button"
-            className="system-msg-btn"
+            className="cursor-pointer whitespace-nowrap rounded-[10px] border border-[#6994e6]/45 bg-[#052b72]/35 px-3.5 py-2 text-sm text-[#c9dcff] hover:bg-[#052b72]/60 disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() => setSystemModalOpen(true)}
             disabled={!selectedConversationId || creatingChat}
           >
@@ -440,7 +472,7 @@ function Chatbot() {
           </button>
         </header>
 
-        <section className="chatbot-messages">
+        <section className="flex flex-col gap-4 overflow-y-auto p-6">
           {isopen ? (
             <FileUpload
               variant="modal"
@@ -450,12 +482,12 @@ function Chatbot() {
             />
           ) : null}
           {!selectedConversationId && displayedMessages.length === 0 ? (
-            <div className="chatbot-empty-state">
-              <h2>How can I help you today?</h2>
-              <p>Start a new chat or select a conversation from the sidebar.</p>
+            <div className="m-auto max-w-[420px] text-center text-[#c5c5d2]">
+              <h2 className="mb-2 text-2xl text-[#ececec]">How can I help you today?</h2>
+              <p className="mb-5">Start a new chat or select a conversation from the sidebar.</p>
               <button
                 type="button"
-                className="start-chat-btn"
+                className={`${sidebarBtnClass} mx-auto min-w-[140px] w-auto`}
                 onClick={() => void handleStartChat()}
                 disabled={creatingChat}
               >
@@ -463,38 +495,62 @@ function Chatbot() {
               </button>
             </div>
           ) : displayedMessages.length === 0 ? (
-            <div className="chatbot-empty-state compact">
+            <div className="mx-auto mt-10 max-w-[420px] text-center text-[#c5c5d2]">
               <p>Send a message to begin this conversation.</p>
             </div>
           ) : (
-            displayedMessages.map((message) => (
-              <div
-                key={message.key}
-                className={`chat-msg ${message.user_type === "user" ? "user" : "system"}${message.streaming ? " streaming" : ""
+            displayedMessages.map((message) => {
+              const isUser = message.user_type === "user";
+              return (
+                <div
+                  key={message.key}
+                  className={`flex max-w-[72%] flex-col gap-1 sm:max-w-[90%] ${
+                    isUser ? "self-end" : "self-start"
                   }`}
-              >
-                <div className="chat-msg-label">
-                  {message.user_type === "user" ? "You" : "System"}
+                >
+                  <div
+                    className={`px-1 text-xs text-[#8e8ea0] ${
+                      isUser ? "text-right" : "text-left"
+                    }`}
+                  >
+                    {isUser ? "You" : "System"}
+                  </div>
+                  <div
+                    className={`break-words rounded-[14px] px-3.5 py-3 leading-relaxed ${
+                      isUser
+                        ? "rounded-tr-sm bg-[#031055] text-white"
+                        : "rounded-tl-sm bg-[#2f2f2f]"
+                    } ${message.streaming ? "border border-[#6994e6]/35" : ""}`}
+                  >
+                    {message.statement}
+                    {message.streaming ? (
+                      <span className="ml-0.5 inline-block animate-blink">▍</span>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="chat-msg-content">
-                  {message.statement}
-                  {message.streaming ? <span className="stream-cursor">▍</span> : null}
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
           <div ref={messagesEndRef} />
         </section>
 
-        <footer className="chatbot-input">
-          <form onSubmit={(event) => void handleSend(event)}>
+        <footer className="border-t border-white/10 bg-[#212121] px-6 pb-6 pt-4">
+          <form
+            onSubmit={(event) => void handleSend(event)}
+            className="mx-auto flex max-w-[900px] gap-2.5"
+          >
             <input
               placeholder="Type your message..."
               value={input}
               onChange={(event) => setInput(event.target.value)}
               disabled={sending || creatingChat}
+              className="flex-1 rounded-full border border-white/10 bg-[#2f2f2f] px-[18px] py-3.5 text-[#ececec] outline-none focus:border-sky-200/60"
             />
-            <button type="submit" disabled={!input.trim() || sending || creatingChat}>
+            <button
+              type="submit"
+              disabled={!input.trim() || sending || creatingChat}
+              className="cursor-pointer rounded-full border-0 bg-[#052b72] px-[22px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-55"
+            >
               Send
             </button>
           </form>

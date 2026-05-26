@@ -1,14 +1,25 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-backend/venv/
-backend/.venv/
+# Environment
 backend/.env
-backend/*.db
+frontend/.env
+.env
+.env.docker
+
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+.pytest_cache/
 
 # Node
 frontend/node_modules/
 frontend/dist/
-frontend/.env
-frontend/.env.local
+
+# Runtime data
+backend/files/*
+!backend/files/.gitkeep
+chroma-data/
+
+# IDE
+.idea/
+.vscode/
+*.swp

@@ -1,6 +1,6 @@
-import { api, toFileUrl } from "../api/axios";
+import { api, fileDownloadUrl, toFileUrl } from "../api/axios";
 
-export { toFileUrl };
+export { fileDownloadUrl, toFileUrl };
 
 export type FileRecord = {
   id: number;
