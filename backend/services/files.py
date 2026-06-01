@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import logging
 import shutil
@@ -5,9 +6,9 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import func
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.chroma import delete_vectors_for_file
 from core.config import settings
@@ -27,33 +28,44 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 _TERMINAL_STATUSES = {IngestionJob.STATUS_COMPLETE, IngestionJob.STATUS_FAILED_PERMANENT}
 
 
-def _compute_file_hash(path: Path) -> str:
+def _save_and_hash(src_file, dest_path: Path) -> str:
+    """Write src_file to dest_path and return its SHA-256 hex digest.
+
+    Runs in a thread pool via asyncio.to_thread to avoid blocking the event loop
+    during large file uploads (up to MAX_FILE_SIZE_MB).
+    """
+    with dest_path.open("wb") as buf:
+        shutil.copyfileobj(src_file, buf)
     sha = hashlib.sha256()
-    with path.open("rb") as fh:
+    with dest_path.open("rb") as fh:
         for block in iter(lambda: fh.read(65536), b""):
             sha.update(block)
     return sha.hexdigest()
 
 
-def upload_files(file: UploadFile, db: Session, current_user: User, description: str | None) -> UploadResponse:
+async def upload_files(file: UploadFile, db: AsyncSession, current_user: User, description: str | None) -> UploadResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
 
     generated_name = f"{uuid4().hex}_{file.filename}"
     saved_path = UPLOAD_DIR / generated_name
 
-    with saved_path.open("wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    file_hash = _compute_file_hash(saved_path)
+    file_hash = await asyncio.to_thread(_save_and_hash, file.file, saved_path)
 
     # Per-user disk quota — reject before any DB work if over limit
     if settings.max_user_storage_mb > 0:
-        used_bytes: int = (
-            db.query(func.sum(FileRecord.filesize))
-            .filter(FileRecord.user_id == current_user.id, FileRecord.is_active == True)  # noqa: E712
-            .scalar()
-        ) or 0
+        # pg_advisory_xact_lock serializes concurrent uploads per user so the
+        # quota read + insert are atomic. Released on transaction end.
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(:uid)").bindparams(uid=current_user.id)
+        )
+        result = await db.execute(
+            select(func.sum(FileRecord.filesize)).where(
+                FileRecord.user_id == current_user.id,
+                FileRecord.is_active == True,  # noqa: E712
+            )
+        )
+        used_bytes: int = result.scalar() or 0
         limit_bytes = settings.max_user_storage_mb * 1024 * 1024
         if used_bytes + saved_path.stat().st_size > limit_bytes:
             saved_path.unlink(missing_ok=True)
@@ -67,25 +79,23 @@ def upload_files(file: UploadFile, db: Session, current_user: User, description:
             )
 
     # Active duplicate — same content already live for this user
-    active_dup = (
-        db.query(FileRecord)
-        .filter(
+    result = await db.execute(
+        select(FileRecord).where(
             FileRecord.user_id == current_user.id,
             FileRecord.file_hash == file_hash,
-            FileRecord.is_active == True,
+            FileRecord.is_active == True,  # noqa: E712
         )
-        .first()
     )
+    active_dup = result.scalars().first()
     if active_dup is not None:
         saved_path.unlink(missing_ok=True)
-        convo = (
-            db.query(ConversationList)
-            .filter(
+        convo_result = await db.execute(
+            select(ConversationList).where(
                 ConversationList.file_id == active_dup.id,
-                ConversationList.is_active == True,
+                ConversationList.is_active == True,  # noqa: E712
             )
-            .first()
         )
+        convo = convo_result.scalars().first()
         raise HTTPException(
             status_code=409,
             detail={
@@ -96,17 +106,23 @@ def upload_files(file: UploadFile, db: Session, current_user: User, description:
         )
 
     # Soft-deleted duplicate — reactivate and create a new conversation, no re-ingestion needed
-    soft_dup = (
-        db.query(FileRecord)
-        .filter(
+    result = await db.execute(
+        select(FileRecord).where(
             FileRecord.user_id == current_user.id,
             FileRecord.file_hash == file_hash,
-            FileRecord.is_active == False,
+            FileRecord.is_active == False,  # noqa: E712
         )
-        .first()
     )
+    soft_dup = result.scalars().first()
+
     if soft_dup is not None:
-        saved_path.unlink(missing_ok=True)  # old disk copy is still present from original upload
+        soft_dup_disk_path = UPLOAD_DIR / Path(soft_dup.filepath).name
+        if not soft_dup_disk_path.exists():
+            # Disk file was cleaned up manually; treat as a new upload instead of reactivating.
+            soft_dup = None
+
+    if soft_dup is not None:
+        saved_path.unlink(missing_ok=True)
         soft_dup.is_active = True
         convo = ConversationList(
             user_id=current_user.id,
@@ -116,9 +132,9 @@ def upload_files(file: UploadFile, db: Session, current_user: User, description:
             is_active=True,
         )
         db.add(convo)
-        db.commit()
-        db.refresh(soft_dup)
-        db.refresh(convo)
+        await db.commit()
+        await db.refresh(soft_dup)
+        await db.refresh(convo)
         return UploadResponse(
             id=soft_dup.id,
             filename=soft_dup.filename,
@@ -142,9 +158,9 @@ def upload_files(file: UploadFile, db: Session, current_user: User, description:
     db.add(db_record)
 
     try:
-        db.flush()  # assigns db_record.id; raises IntegrityError on hash collision
+        await db.flush()  # assigns db_record.id; raises IntegrityError on hash collision
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         saved_path.unlink(missing_ok=True)
         raise HTTPException(status_code=409, detail="A file with this content was just uploaded.")
 
@@ -158,24 +174,23 @@ def upload_files(file: UploadFile, db: Session, current_user: User, description:
     db.add(convo)
 
     try:
-        db.commit()
+        await db.commit()
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         saved_path.unlink(missing_ok=True)
         raise HTTPException(status_code=409, detail="A file with this content was just uploaded.")
 
-    db.refresh(db_record)
-    db.refresh(convo)
+    await db.refresh(db_record)
+    await db.refresh(convo)
 
     # don't dispatch a second task if a rapid client retry beats us here
-    existing_job = (
-        db.query(IngestionJob)
-        .filter(
+    result = await db.execute(
+        select(IngestionJob).where(
             IngestionJob.file_id == db_record.id,
             IngestionJob.status.notin_(_TERMINAL_STATUSES),
         )
-        .first()
     )
+    existing_job = result.scalars().first()
     if existing_job is not None:
         logger.warning(
             "Active ingestion job %s already exists for file %s; skipping duplicate dispatch.",
@@ -192,10 +207,10 @@ def upload_files(file: UploadFile, db: Session, current_user: User, description:
     try:
         job = IngestionJob(file_id=db_record.id, status=IngestionJob.STATUS_QUEUED)
         db.add(job)
-        db.commit()
-        db.refresh(job)
+        await db.commit()
+        await db.refresh(job)
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         logger.warning("IntegrityError creating IngestionJob for file %s; duplicate guard hit.", db_record.id)
         return UploadResponse(
             id=db_record.id,
@@ -205,9 +220,9 @@ def upload_files(file: UploadFile, db: Session, current_user: User, description:
             conversation_id=convo.id,
         )
 
-    result = run_ingestion.delay(job.id, db_record.id)
-    job.celery_task_id = result.id
-    db.commit()
+    result_task = run_ingestion.delay(job.id, db_record.id)
+    job.celery_task_id = result_task.id
+    await db.commit()
 
     return UploadResponse(
         id=db_record.id,
@@ -218,8 +233,9 @@ def upload_files(file: UploadFile, db: Session, current_user: User, description:
     )
 
 
-def delete_file(file_id: int, user_id: int | None, db: Session) -> dict:
-    record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
+async def delete_file(file_id: int, user_id: int | None, db: AsyncSession) -> dict:
+    result = await db.execute(select(FileRecord).where(FileRecord.id == file_id))
+    record = result.scalars().first()
     if record is None or (user_id is not None and record.user_id != user_id):
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -237,12 +253,13 @@ def delete_file(file_id: int, user_id: int | None, db: Session) -> dict:
         disk_path.unlink()
 
     db.delete(record)
-    db.commit()
+    await db.commit()
     return {"message": "File deleted successfully"}
 
 
-def reingest_file(file_id: int, user_id: int, db: Session) -> dict:
-    record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
+async def reingest_file(file_id: int, user_id: int, db: AsyncSession) -> dict:
+    result = await db.execute(select(FileRecord).where(FileRecord.id == file_id))
+    record = result.scalars().first()
     if record is None or record.user_id != user_id:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -258,16 +275,13 @@ def reingest_file(file_id: int, user_id: int, db: Session) -> dict:
     record.ingestion_status = IngestionJob.STATUS_QUEUED
     job = IngestionJob(file_id=record.id, status=IngestionJob.STATUS_QUEUED)
     db.add(job)
-    db.commit()
-    db.refresh(job)
+    await db.commit()
+    await db.refresh(job)
 
-    result = run_ingestion.delay(job.id, record.id)
-    job.celery_task_id = result.id
-    db.commit()
+    result_task = run_ingestion.delay(job.id, record.id)
+    job.celery_task_id = result_task.id
+    await db.commit()
 
     return {"message": "Re-ingestion started", "job_id": job.id}
 
-def get_file_by_user_id(user_id, db):
-    
-    user_file = db.query(FileRecord).where(FileRecord.user_id == user_id,FileRecord.is_active == True).first();
-    return user_file
+

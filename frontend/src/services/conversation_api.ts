@@ -11,11 +11,8 @@ export type ConversationListItem = {
   id: number;
   conversation_title: string;
   is_active: boolean;
-};
-
-export type ConversationPayload = {
-  statement: string;
-  user_type: "user" | "system";
+  conversation_type: string;
+  file_id: number | null;
 };
 
 export type ChatWsEvent =
@@ -81,31 +78,9 @@ export async function getConversation(conversationListId: number) {
   return response.data;
 }
 
-export async function postConversationChat(
-  conversationListId: number,
-  chat: ConversationPayload
-) {
-  const response = await api.post<Conversation>(
-    `/conversation/conversation/${conversationListId}`,
-    chat
-  );
-  return response.data;
-}
-
 export async function createConversationList() {
   const response = await api.post<ConversationListItem>(
     "/conversation/inconversationlist"
-  );
-  return response.data;
-}
-
-export async function updateConversationTitle(
-  conversationId: number,
-  conversationTitle: string
-) {
-  const response = await api.patch(
-    `/conversation/conversation-title/${conversationId}`,
-    { conversation_title: conversationTitle }
   );
   return response.data;
 }

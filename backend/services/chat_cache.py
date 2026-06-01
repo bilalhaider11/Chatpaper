@@ -10,6 +10,14 @@ logger = logging.getLogger(__name__)
 
 FLUSH_QUEUE_KEY = "chat:flush:queue"
 
+# Atomically reads and clears the flush queue in a single round-trip,
+# preventing message loss from concurrent drain calls (TOCTOU between LRANGE + DEL).
+_DRAIN_QUEUE_SCRIPT = (
+    "local i=redis.call('LRANGE',KEYS[1],0,-1) "
+    "if #i>0 then redis.call('DEL',KEYS[1]) end "
+    "return i"
+)
+
 
 @dataclass
 class QueuedChatMessage:
@@ -122,11 +130,10 @@ async def drain_flush_queue() -> list[QueuedChatMessage]:
     if redis_client is None:
         return await _memory_cache.drain_flush_queue()
 
-    payloads = await redis_client.lrange(FLUSH_QUEUE_KEY, 0, -1)
+    payloads = await redis_client.eval(_DRAIN_QUEUE_SCRIPT, 1, FLUSH_QUEUE_KEY)
     if not payloads:
         return []
 
-    await redis_client.delete(FLUSH_QUEUE_KEY)
     messages = [_message_from_json(item) for item in payloads]
 
     pipe = redis_client.pipeline()
@@ -159,7 +166,6 @@ async def append_stream_chunk(chat_id: int, temp_id: str, chunk: str) -> None:
         return
 
     key = _stream_key(chat_id, temp_id)
-    print("key: ",key)
     pipe = redis_client.pipeline()
     pipe.append(key, chunk)
     pipe.expire(key, settings.chat_stream_ttl_seconds)

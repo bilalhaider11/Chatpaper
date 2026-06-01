@@ -45,6 +45,14 @@ export async function login(email: string, password: string) {
   return response.data;
 }
 
+export async function exchangeOAuthCode(code: string) {
+  const response = await api.post<{ access_token: string; token_type: string }>(
+    "/auth/exchange-token",
+    { code }
+  );
+  return response.data;
+}
+
 export async function signup(email:string, password:string){
   const payload = {
   "email": email,

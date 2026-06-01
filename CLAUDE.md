@@ -1,5 +1,18 @@
 # Chatpaper — Claude Rules
 
+---
+
+## Product Requirements (Always Verify Against These)
+
+Chatpaper is a document-chat SaaS. Every feature, fix, and test must satisfy all four of these invariants:
+
+1. **Upload & ingest** — Authenticated users can upload documents (PDF, DOCX, TXT, CSV, XLSX). Each upload is processed asynchronously through a 6-stage ingestion pipeline and stored in ChromaDB + PostgreSQL.
+2. **Per-document chat** — Every uploaded document automatically gets its own conversation (`conversation_type = "per_file"`). A per-file conversation can only retrieve context from that single document. One document = one active per-file conversation.
+3. **Global chat room** — Users can also open a global conversation (`conversation_type = "global"`) that retrieves context across all their documents simultaneously. Multiple global conversations are allowed.
+4. **Strict data isolation** — A user can only see, query, download, and chat about their own documents and conversations. No cross-user data access, ever. Violations must return 404 (not 403) to avoid leaking existence information.
+
+---
+
 ## Core Principles
 
 ### KISS (Keep It Simple, Stupid)

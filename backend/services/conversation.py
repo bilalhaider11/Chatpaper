@@ -1,14 +1,14 @@
 from fastapi import HTTPException
-from sqlalchemy import update
-from sqlalchemy.orm import Session
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.conversation import Conversation, ConversationList
 from models.file_model import FileRecord
-from schema.conversation import ConversationCreateRequest, ConversationListBase
+from schema.conversation import ConversationCreateRequest
 from services.chat_cache import get_active_streams, get_pending_messages
 
 
-def create_conversation_list(current_user, body: ConversationCreateRequest, db: Session) -> ConversationList:
+async def create_conversation_list(current_user, body: ConversationCreateRequest, db: AsyncSession) -> ConversationList:
     db_data = ConversationList(
         user_id=current_user.id,
         conversation_title=body.conversation_title,
@@ -16,70 +16,76 @@ def create_conversation_list(current_user, body: ConversationCreateRequest, db: 
         is_active=True,
     )
     db.add(db_data)
-    db.commit()
-    db.refresh(db_data)
+    await db.commit()
+    await db.refresh(db_data)
     return db_data
 
 
-def delete_conversation(convo_id: int, db: Session) -> dict:
-    convo = db.query(ConversationList).filter(ConversationList.id == convo_id).first()
+async def delete_conversation(convo_id: int, db: AsyncSession) -> dict:
+    result = await db.execute(select(ConversationList).where(ConversationList.id == convo_id))
+    convo = result.scalars().first()
     if convo is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     if convo.conversation_type == "per_file" and convo.file_id is not None:
-        file_record = db.query(FileRecord).filter(FileRecord.id == convo.file_id).first()
+        fr = await db.execute(select(FileRecord).where(FileRecord.id == convo.file_id))
+        file_record = fr.scalars().first()
         if file_record is not None:
             file_record.is_active = False
 
     convo.is_active = False
-    db.commit()
+    await db.commit()
     return {"message": "Conversation deleted successfully"}
 
 
-def update_conversation_title(title: ConversationListBase, conversation_id: int, session: Session) -> dict:
-    if not title or not title.conversation_title:
+async def update_conversation_title(title: str, conversation_id: int, session: AsyncSession) -> dict:
+    if not title or not title.strip():
         raise HTTPException(status_code=400, detail="No title to update")
 
-    statement = (
+    stmt = (
         update(ConversationList)
         .where(ConversationList.id == conversation_id)
-        .values(conversation_title=title.conversation_title)
+        .values(conversation_title=title)
     )
-    session.execute(statement)
-    session.commit()
+    await session.execute(stmt)
+    await session.commit()
     return {"Title": "Updated Successfully"}
 
 
-def add_conversation(data, chat_id, db):
-    if not chat_id:
-        raise HTTPException(status_code=400, detail="Chat does not exist")
+async def delete_conversation_list(list_id: int, db: AsyncSession) -> dict:
+    result = await db.execute(select(ConversationList).where(ConversationList.id == list_id))
+    convo = result.scalars().first()
+    if convo is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
-    statement = Conversation(
-        chat_id=chat_id,
-        user_type=data.user_type,
-        statement=data.statement,
-    )
-    db.add(statement)
-    db.commit()
-    db.refresh(statement)
-    return statement
+    if convo.conversation_type == "per_file" and convo.file_id is not None:
+        fr = await db.execute(select(FileRecord).where(FileRecord.id == convo.file_id))
+        file_record = fr.scalars().first()
+        if file_record is not None:
+            file_record.is_active = False
+
+    convo.is_active = False
+    await db.commit()
+    return {"message": "Conversation list deleted successfully"}
 
 
-async def get_conversations(chat_list_id, db):
+async def get_conversations(chat_list_id, db: AsyncSession, limit: int = 50, offset: int = 0):
     if not chat_list_id:
         raise HTTPException(status_code=400, detail="Chat does not exist")
 
-    conversations = (
-        db.query(Conversation)
-        .order_by(Conversation.created_at.asc())
+    result = await db.execute(
+        select(Conversation)
         .where(Conversation.chat_id == chat_list_id)
-        .limit(25)
+        .order_by(Conversation.created_at.asc())
+        .limit(limit)
+        .offset(offset)
     )
+    conversations = list(result.scalars().all())
 
     pending = await get_pending_messages(chat_list_id)
     streams = await get_active_streams(chat_list_id)
 
-    merged: list = list(conversations)
+    merged: list = conversations
     for msg in pending:
         merged.append(
             Conversation(
@@ -101,16 +107,15 @@ async def get_conversations(chat_list_id, db):
     return merged
 
 
-def get_conversation_list_for_user(chat_list_id: int, user_id: int, db: Session) -> ConversationList:
-    conversation_list = (
-        db.query(ConversationList)
-        .filter(
+async def get_conversation_list_for_user(chat_list_id: int, user_id: int, db: AsyncSession) -> ConversationList:
+    result = await db.execute(
+        select(ConversationList).where(
             ConversationList.id == chat_list_id,
             ConversationList.user_id == user_id,
-            ConversationList.is_active == True,
+            ConversationList.is_active == True,  # noqa: E712
         )
-        .first()
     )
+    conversation_list = result.scalars().first()
     if not conversation_list:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation_list

@@ -4,39 +4,42 @@ from datetime import timedelta
 
 import httpx
 from authlib.integrations.starlette_client import OAuth
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import create_access_token
 from core.config import settings
 from core.dependencies import get_db
-from schema import auth as schema_auth
+from core.redis_client import get_redis
 from services import auth as service_auth
 
 logger = logging.getLogger(__name__)
 
-oauth = OAuth()
-oauth.register(
-    name="google",
-    client_id=settings.google_client_id,
-    client_secret=settings.google_client_secret,
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile"},
-    authorize_params=None
+_OAUTH_CODE_TTL = 60  # seconds; single-use code exchanged by the frontend
 
-)
+oauth = OAuth()
+if settings.google_client_id and settings.google_client_secret:
+    oauth.register(
+        name="google",
+        client_id=settings.google_client_id,
+        client_secret=settings.google_client_secret,
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+        authorize_params=None,
+    )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _callback_redirect_uri(request: Request) -> str:
-    
     return str(request.url_for("google_callback"))
 
 
 @router.get("/google-login")
 async def google_login(request: Request):
+    if not settings.google_client_id:
+        raise HTTPException(status_code=501, detail="Google OAuth is not configured on this server.")
     redirect_uri = _callback_redirect_uri(request)
     request.session["oauth_redirect_uri"] = redirect_uri
     request.session["login_redirect"] = settings.frontend_url
@@ -47,8 +50,8 @@ async def google_login(request: Request):
     )
 
 
-@router.get("")
-async def google_callback(request: Request, db: Session = Depends(get_db)):
+@router.get("/google-callback")
+async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         token = await oauth.google.authorize_access_token(request)
     except Exception as exc:
@@ -57,7 +60,7 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
             status_code=401,
             detail=f"Google authentication failed: {exc}",
         ) from exc
-    
+
     user_info = token.get("userinfo")
     if not user_info and token.get("access_token"):
         async with httpx.AsyncClient() as client:
@@ -76,26 +79,42 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
     if iss not in ("https://accounts.google.com", "accounts.google.com") or not user_email:
         raise HTTPException(status_code=401, detail="Google authentication failed.")
 
-    userData = service_auth.get_user_by_email(db, user_email)
-    if userData is None:
-        new_user = schema_auth.UserCreate(
-            email=user_email,
-            password="qwQW12!@"
-        )
-        userData = service_auth.create_new_user(db, new_user)
-        
+    user_data = await service_auth.get_user_by_email(db, user_email)
+    if user_data is None:
+        user_data = await service_auth.create_google_user(db, user_email)
 
-    role = userData.role.value if hasattr(userData.role, "value") else userData.role
-    
+    role = user_data.role.value if hasattr(user_data.role, "value") else user_data.role
+
     access_token = create_access_token(
-        data={
-            "id": userData.id,
-            "email": userData.email,
-            "role": role,
-        },
+        data={"id": user_data.id, "email": user_data.email, "role": role},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
-    
-    frontend_url = request.session.pop("login_redirect", settings.frontend_url)
-    redirect_target = f"{frontend_url.rstrip('/')}/login?token={access_token}"
-    return RedirectResponse(url=redirect_target)
+
+    redis = get_redis()
+    if redis is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Auth service temporarily unavailable. Please try again.",
+        )
+
+    # Store JWT under a short-lived single-use code so it never appears in the redirect URL.
+    code = secrets.token_urlsafe(32)
+    await redis.set(f"oauth:code:{code}", access_token, ex=_OAUTH_CODE_TTL)
+
+    frontend_url = request.session.pop("login_redirect", settings.frontend_url) or settings.frontend_url or "/"
+    return RedirectResponse(url=f"{frontend_url.rstrip('/')}/login?code={code}")
+
+
+@router.post("/exchange-token")
+async def exchange_oauth_token(code: str = Body(..., embed=True)):
+    """Exchange a short-lived OAuth code for a JWT. Codes are single-use and expire in 60 s."""
+    redis = get_redis()
+    if redis is None:
+        raise HTTPException(status_code=503, detail="Auth service temporarily unavailable.")
+
+    # GETDEL atomically reads and deletes — prevents replay attacks.
+    access_token = await redis.getdel(f"oauth:code:{code}")
+    if access_token is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired code.")
+
+    return {"access_token": access_token, "token_type": "bearer"}

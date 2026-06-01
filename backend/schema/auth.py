@@ -21,6 +21,7 @@ class User(UserBase):
     id: int
     is_active: bool
     role: auth.UserRole
+    auth_provider: str
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)

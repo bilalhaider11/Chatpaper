@@ -48,5 +48,3 @@ class ConversationResponse(BaseModel):
 class ChatWsSendPayload(BaseModel):
     action: str = "send"
     statement: str
-    user_type: str
-    

@@ -1,26 +1,29 @@
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import auth as auth_functions
 from services import auth as auth_service
 from schema import auth as schema_auth
 from core.config import settings
 from core.dependencies import get_db
+from core.limiter import limiter
 from models.check_role import RoleChecker
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=schema_auth.Token)
-def login_for_access_token(
+@limiter.limit("5/minute")
+async def login_for_access_token(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    member = auth_functions.authenticate_user(
+    member = await auth_functions.authenticate_user(
         db,
         email=form_data.username,
         password=form_data.password,
@@ -42,11 +45,14 @@ def login_for_access_token(
 
 
 @router.post("/users", response_model=schema_auth.User)
-async def create_new_user(user: schema_auth.UserCreate, db: Session = Depends(get_db)):
-    db_user = auth_service.get_user_by_email(db, user.email)
+@limiter.limit("3/minute")
+async def create_new_user(request: Request, user: schema_auth.UserCreate, db: AsyncSession = Depends(get_db)):
+    if not settings.registration_open:
+        raise HTTPException(status_code=403, detail="Registration is closed")
+    db_user = await auth_service.get_user_by_email(db, user.email)
     if db_user:
         raise HTTPException(status_code=400, detail="User already exists")
-    return auth_service.create_new_user(db, user)
+    return await auth_service.create_new_user(db, user)
 
 
 @router.get(
@@ -54,8 +60,8 @@ async def create_new_user(user: schema_auth.UserCreate, db: Session = Depends(ge
     response_model=list[schema_auth.User],
     dependencies=[Depends(RoleChecker(["admin"]))],
 )
-async def read_all_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    return auth_service.read_all_user(db, skip, limit)
+async def read_all_users(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+    return await auth_service.read_all_user(db, skip, limit)
 
 
 @router.get("/users/me", response_model=schema_auth.User)
@@ -70,8 +76,8 @@ async def read_me(
     response_model=schema_auth.User,
     dependencies=[Depends(RoleChecker(["admin"]))],
 )
-async def read_user_by_id(user_id: int, db: Session = Depends(get_db)):
-    return auth_service.get_user_by_id(db, user_id)
+async def read_user_by_id(user_id: int, db: AsyncSession = Depends(get_db)):
+    return await auth_service.get_user_by_id(db, user_id)
 
 
 @router.patch(
@@ -80,9 +86,9 @@ async def read_user_by_id(user_id: int, db: Session = Depends(get_db)):
     dependencies=[Depends(RoleChecker(["admin"]))],
 )
 async def update_user(
-    user_id: int, user: schema_auth.UserUpdate, db: Session = Depends(get_db)
+    user_id: int, user: schema_auth.UserUpdate, db: AsyncSession = Depends(get_db)
 ):
-    return auth_service.update_user(db, user_id, user)
+    return await auth_service.update_user(db, user_id, user)
 
 
 @router.delete(
@@ -90,7 +96,5 @@ async def update_user(
     response_model=schema_auth.User,
     dependencies=[Depends(RoleChecker(["admin"]))],
 )
-async def delete_user(user_id: int, db: Session = Depends(get_db)):
-    return auth_service.delete_user(db, user_id)
-
-
+async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
+    return await auth_service.delete_user(db, user_id)

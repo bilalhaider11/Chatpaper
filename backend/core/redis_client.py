@@ -1,29 +1,3 @@
-#from typing import Optional
-#
-#import redis as redis_lib
-#
-#from core.config import settings
-#
-#_redis_client: Optional[redis_lib.Redis] = None
-#
-#
-#def get_redis_client() -> redis_lib.Redis:
-#    # redis.from_url is lazy — no actual TCP connect until first command
-#    global _redis_client
-#    if _redis_client is None:
-#        _redis_client = redis_lib.Redis.from_url(
-#            settings.redis_url,
-#            decode_responses=True,
-#        )
-#    return _redis_client
-#
-#
-#def reset_redis_client() -> None:  # test helper only
-#    global _redis_client
-#    _redis_client = None
-
-
-
 import logging
 import redis.asyncio as redis
 from core.config import settings
@@ -43,7 +17,11 @@ async def start_redis() -> None:
         await client.ping()
         _redis = client
         logger.info("Redis connected at %s", settings.redis_url)
-    except Exception:
+    except Exception as exc:
+        if settings.require_redis:
+            raise RuntimeError(
+                f"REQUIRE_REDIS=true but Redis is unreachable at {settings.redis_url}: {exc}"
+            ) from exc
         logger.warning(
             "Redis unavailable (%s); chat cache will use in-memory fallback",
             settings.redis_url,

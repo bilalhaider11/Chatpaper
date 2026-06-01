@@ -1,10 +1,9 @@
 import asyncio
 import json
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from aio_pika import DeliveryMode
+
 import aio_pika
+from aio_pika import DeliveryMode
 from aio_pika.abc import AbstractIncomingMessage
 from sqlalchemy.orm import Session
 
@@ -22,44 +21,14 @@ logger = logging.getLogger(__name__)
 
 QUEUE_NAME = "chat_messages"
 USER_TYPE_USER = "user"
-USER_TYPE_SYSTEM = "system"
+USER_TYPE_SYSTEM = "assistant"
 ALLOWED_USER_TYPES = {USER_TYPE_USER, USER_TYPE_SYSTEM}
 
-
-@dataclass
-class QueuedChatMessage:
-    chat_id: int
-    user_type: str
-    statement: str
-    temp_id: str | None = None
-    enqueued_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-class ChatMessageBuffer:
-    def __init__(self) -> None:
-        self._items: list[QueuedChatMessage] = []
-        self._lock = asyncio.Lock()
-
-    async def add(self, item: QueuedChatMessage) -> None:
-        async with self._lock:
-            self._items.append(item)
-
-    async def drain(self) -> list[QueuedChatMessage]:
-        async with self._lock:
-            batch = self._items[:]
-            self._items.clear()
-            return batch
-
-    async def size(self) -> int:
-        async with self._lock:
-            return len(self._items)
-
-
-_buffer = ChatMessageBuffer()
 _connection: aio_pika.RobustConnection | None = None
 _channel: aio_pika.RobustChannel | None = None
 _consumer_task: asyncio.Task | None = None
 _flush_task: asyncio.Task | None = None
+
 
 def bulk_insert_messages(db: Session, messages: list[QueuedChatMessage]) -> list[Conversation]:
     rows = [
@@ -68,10 +37,8 @@ def bulk_insert_messages(db: Session, messages: list[QueuedChatMessage]) -> list
             user_type=msg.user_type,
             statement=msg.statement,
         )
-        
         for msg in messages
     ]
-    
     db.add_all(rows)
     db.commit()
     for row in rows:
@@ -109,18 +76,11 @@ async def _periodic_flush() -> None:
 
 
 async def _on_queue_message(message: AbstractIncomingMessage) -> None:
+    # Messages are already enqueued to Redis by publish_chat_message before
+    # RabbitMQ publish; just ack to keep the queue drained.
     async with message.process():
-        payload = json.loads(message.body.decode())
-        queued = QueuedChatMessage(
-            chat_id=int(payload["chat_id"]),
-            user_type=payload["user_type"],
-            statement=payload["statement"],
-            temp_id=payload.get("temp_id"),
-        )
-        if queued.user_type not in ALLOWED_USER_TYPES:
-            return
-        await _buffer.add(queued)
-        
+        pass
+
 
 async def publish_chat_message(
     chat_id: int,
@@ -173,7 +133,7 @@ async def start_messaging() -> None:
         logger.info("RabbitMQ chat consumer started on queue %s", QUEUE_NAME)
     except Exception:
         logger.warning(
-            "RabbitMQ unavailable (%s); using in-memory buffer only",
+            "RabbitMQ unavailable (%s); using Redis queue only",
             settings.rabbitmq_url,
         )
         _connection = None
@@ -201,7 +161,6 @@ async def stop_messaging() -> None:
 
     try:
         await flush_buffer_to_db()
-        
     except Exception:
         logger.exception("Final chat flush failed")
 
@@ -211,6 +170,3 @@ async def stop_messaging() -> None:
     if _connection:
         await _connection.close()
         _connection = None
-
-
-

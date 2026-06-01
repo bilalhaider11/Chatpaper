@@ -1,7 +1,8 @@
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import get_current_user
 from core.config import settings
@@ -92,28 +93,32 @@ async def ask(
     conversation_id: int,
     body: AskRequest,
     current_user=Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
         llm = get_chat_llm(temperature=0.2)
     except RuntimeError:
         raise HTTPException(status_code=503, detail="LLM dependencies not installed")
 
-    q = db.query(ConversationList).filter(ConversationList.id == conversation_id)
+    stmt = select(ConversationList).where(
+        ConversationList.id == conversation_id,
+        ConversationList.is_active == True,  # noqa: E712
+    )
     if current_user.role != UserRole.admin:
-        q = q.filter(ConversationList.user_id == current_user.id)
-    convo = q.first()
+        stmt = stmt.where(ConversationList.user_id == current_user.id)
+    result = await db.execute(stmt)
+    convo = result.scalars().first()
     if convo is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     # Fetch recent history FIRST so we can enrich the retrieval query with prior context.
-    history = (
-        db.query(Conversation)
-        .filter(Conversation.chat_id == conversation_id)
+    history_result = await db.execute(
+        select(Conversation)
+        .where(Conversation.chat_id == conversation_id)
         .order_by(Conversation.created_at.desc())
         .limit(settings.chat_history_turns)
-        .all()
     )
+    history = list(history_result.scalars().all())
     history.reverse()
     history = _truncate_history(history, settings.chat_history_max_chars)
 
@@ -137,7 +142,7 @@ async def ask(
         case _:  # global
             file_ids = None
 
-    contexts = retrieve(
+    contexts = await retrieve(
         query=retrieval_query,
         user_id=convo.user_id,
         db=db,
@@ -156,11 +161,11 @@ async def ask(
             messages.append(AIMessage(content=turn.statement))
     messages.append(HumanMessage(content=body.question))
 
-    answer: str = llm.invoke(messages).content
+    answer: str = (await llm.ainvoke(messages)).content
 
     db.add(Conversation(chat_id=conversation_id, user_type="user", statement=body.question))
     db.add(Conversation(chat_id=conversation_id, user_type="assistant", statement=answer))
-    db.commit()
+    await db.commit()
 
     # Only include citations whose [N] marker actually appears in the answer.
     referenced = {int(m) for m in _CITATION_RE.findall(answer)}

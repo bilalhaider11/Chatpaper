@@ -5,10 +5,14 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware
 from sqladmin import Admin
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from core.config import settings
 from core.database import engine
+from core.limiter import limiter
 from models import auth, file_model
 from core.redis_client import stop_redis,start_redis
 import models.ingestion  # noqa: F401 — registers DocumentParent, IngestionJob with Base
@@ -23,7 +27,8 @@ async def lifespan(app: FastAPI):
     cfg = Config(str(_ini))
     cfg.set_main_option("script_location", str(_ini.parent / "alembic"))
     cfg.set_main_option("sqlalchemy.url", settings.database)
-    command.upgrade(cfg, "head")
+    if settings.run_migrations_on_startup:
+        command.upgrade(cfg, "head")
     await start_redis()
     await start_messaging()
     yield
@@ -32,9 +37,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+if settings.trust_proxy_headers:
+    # Populate request.client from X-Forwarded-For so slowapi rate limits by real client IP.
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 # SessionMiddleware is required by sqladmin's AuthenticationBackend.
-app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, session_cookie="session",same_site="lax",https_only=False)
+app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, session_cookie="session", same_site="lax", https_only=settings.session_https_only)
 
 
 

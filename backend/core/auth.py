@@ -1,10 +1,11 @@
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import dependencies
 from core.config import settings
@@ -13,14 +14,58 @@ from services import auth
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+_USER_CACHE_TTL = settings.access_token_expire_minutes * 60
+
+
+async def _get_cached_user(user_id: int) -> User | None:
+    from core.redis_client import get_redis
+    redis = get_redis()
+    if redis is None:
+        return None
+    raw = await redis.get(f"user:cache:{user_id}")
+    if raw is None:
+        return None
+    data = json.loads(raw)
+    user = User()
+    user.id = data["id"]
+    user.email = data["email"]
+    user.role = data["role"]
+    user.is_active = data["is_active"]
+    user.auth_provider = data["auth_provider"]
+    return user
+
+
+async def _cache_user(user: User) -> None:
+    from core.redis_client import get_redis
+    redis = get_redis()
+    if redis is None:
+        return
+    data = {
+        "id": user.id,
+        "email": user.email,
+        "role": user.role.value if hasattr(user.role, "value") else user.role,
+        "is_active": user.is_active,
+        "auth_provider": user.auth_provider,
+    }
+    await redis.set(f"user:cache:{user.id}", json.dumps(data), ex=_USER_CACHE_TTL)
+
+
+async def invalidate_user_cache(user_id: int) -> None:
+    from core.redis_client import get_redis
+    redis = get_redis()
+    if redis is not None:
+        await redis.delete(f"user:cache:{user_id}")
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def authenticate_user(db: Session, email: str, password: str) -> User | bool:
-    member = auth.get_user_by_email(db, email)
+async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | bool:
+    member = await auth.get_user_by_email(db, email)
     if not member:
+        return False
+    if member.auth_provider != "password" or member.password is None:
         return False
     if not verify_password(password, member.password):
         return False
@@ -37,9 +82,9 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
 
 
-def get_current_user(
+async def get_current_user(
     token: Annotated[str, Depends(dependencies.oauth2_scheme)],
-    db: Annotated[Session, Depends(dependencies.get_db)],
+    db: Annotated[AsyncSession, Depends(dependencies.get_db)],
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -48,12 +93,22 @@ def get_current_user(
     )
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        current_email: str = payload.get("email")
+        user_id: int | None = payload.get("id")
+        current_email: str | None = payload.get("email")
         if current_email is None:
             raise credentials_exception
-        user = auth.get_user_by_email(db, current_email)
+
+        # Fast path: return cached user row without hitting the DB.
+        if user_id is not None:
+            cached = await _get_cached_user(user_id)
+            if cached is not None:
+                return cached
+
+        user = await auth.get_user_by_email(db, current_email)
         if user is None:
             raise credentials_exception
+
+        await _cache_user(user)
         return user
     except JWTError:
         raise credentials_exception
