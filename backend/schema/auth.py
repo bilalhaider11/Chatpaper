@@ -12,9 +12,8 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
-
 class UserLogin(UserBase):
-    password: str
+    loggedin_by_google: bool = False
 
 
 class User(UserBase):
@@ -35,3 +34,7 @@ class UserUpdate(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    
+
+class GoogleCodeExchange(BaseModel):
+    code: str

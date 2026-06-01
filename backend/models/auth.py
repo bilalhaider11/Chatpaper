@@ -14,7 +14,8 @@ class User(CommonModel):
     __tablename__ = "users"
 
     email = Column(String, unique=True, index=True, nullable=False)
-    password = Column(String, nullable=False)
+    password = Column(String, nullable=True)
+    loggedin_by_google = Column(Boolean, nullable=False, default=False)
 
     role = Column(Enum(UserRole), default=UserRole.user)
 

@@ -31,6 +31,8 @@ services:
     ports:
       - "5673:5672"
       - "15673:15672"
+    environment:
+      - RABBITMQ_SERVER_ADDITIONAL_VARIABLES=listeners.tcp.default=5672
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s

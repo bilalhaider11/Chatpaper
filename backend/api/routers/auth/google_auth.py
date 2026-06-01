@@ -1,10 +1,10 @@
 import logging
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import httpx
 from authlib.integrations.starlette_client import OAuth
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -35,6 +35,7 @@ def _google_callback_url(request: Request) -> str:
     configured = (settings.redirect_url or "").strip()
     if configured.endswith(""):
         return configured
+    
     if configured:
         return f"{configured.rstrip('/')}"
     return str(request.url_for(""))
@@ -62,6 +63,7 @@ async def google_login(request: Request):
 async def google_callback(request: Request, db: Session = Depends(get_db)):
     try:
         token = await oauth.google.authorize_access_token(request)
+        
     except Exception as exc:
         logger.exception("Google token exchange failed")
         raise HTTPException(
@@ -89,24 +91,66 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
 
     userData = service_auth.get_user_by_email(db, user_email)
     if userData is None:
-        new_user = schema_auth.UserCreate(
+        new_user = schema_auth.UserLogin(
             email=user_email,
-            password="qwQW12!@"
+            loggedin_by_google=True,
         )
-        userData = service_auth.create_new_user(db, new_user)
-        
+        userData = service_auth.create_new_user(db, new_user, track_google_login=True)
 
-    role = userData.role.value if hasattr(userData.role, "value") else userData.role
+    login_code = secrets.token_urlsafe(32)
+          
+    try:
+        await service_auth.create_google_login_code(
+            login_code,
+            userData,
+            ttl_seconds=settings.google_login_code_expire_seconds,
+        )
+    except service_auth.RedisUnavailableError as exc:
+        logger.exception("Redis unavailable while creating Google login code")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google authentication service temporarily unavailable.",
+        ) from exc
+
+    frontend_url = request.session.pop("login_redirect", settings.frontend_url)
+    redirect_target = f"{frontend_url.rstrip('/')}/login?code={login_code}"
+
+    return RedirectResponse(url=redirect_target, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/exchange-code", response_model=schema_auth.Token)
+async def exchange_google_login_code(
+    payload: schema_auth.GoogleCodeExchange,
+    db: Session = Depends(get_db),
+):
     
+    code = payload.code.strip()
+    if not code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Login code is required.")
+
+    try:
+        login_data = await service_auth.consume_google_login_code(code)
+    except service_auth.LoginCodeInvalidError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired login code.")
+    except service_auth.RedisUnavailableError as exc:
+        logger.exception("Redis unavailable while exchanging Google login code")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service temporarily unavailable.",
+        ) from exc
+
+    user = service_auth.get_user_by_id(db, int(login_data["user_id"]))
+    if user.email != login_data["email"]:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid login code payload.")
+
+    role = user.role.value if hasattr(user.role, "value") else user.role
     access_token = create_access_token(
         data={
-            "id": userData.id,
-            "email": userData.email,
+            "id": user.id,
+            "email": user.email,
             "role": role,
         },
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
-    
-    frontend_url = request.session.pop("login_redirect", settings.frontend_url)
-    redirect_target = f"{frontend_url.rstrip('/')}/login?token={access_token}"
-    return RedirectResponse(url=redirect_target)
+
+    return {"access_token": access_token, "token_type": "bearer"}

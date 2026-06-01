@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { login, signup } from "../../api/axios";
-import { tokenStore } from "../../api/axios";
+import { exchangeGoogleCode, login, signup, tokenStore } from "../../api/axios";
 import { GoogleAuthButton } from "../../components/login/google_auth";
 
 type LoginProps = {
@@ -21,15 +20,28 @@ function Login({ onLoginSuccess }: LoginProps) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const oauthToken = searchParams.get("token");
-    if (!oauthToken) {
+    const oauthCode = searchParams.get("code");
+    if (!oauthCode) {
       return;
     }
 
-    tokenStore.setToken(oauthToken);
-    setSearchParams({}, { replace: true });
-    onLoginSuccess();
-    navigate("/", { replace: true });
+    const exchangeCode = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const exchangeRes = await exchangeGoogleCode(oauthCode);
+        tokenStore.setToken(exchangeRes.access_token);
+        setSearchParams({}, { replace: true });
+        onLoginSuccess();
+        navigate("/", { replace: true });
+      } catch {
+        setError("Google login failed. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    exchangeCode();
   }, [searchParams, setSearchParams, onLoginSuccess, navigate]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {

@@ -193,6 +193,7 @@ async def websocket_chat_endpoint(
             raw = await websocket.receive_text()
             try:
                 payload = json.loads(raw)
+                payload['user_type'] = 'user'
                 data = ChatWsSendPayload(**payload)
             except Exception:
                 await websocket.send_text(
@@ -205,7 +206,7 @@ async def websocket_chat_endpoint(
 
             await _handle_outgoing_message(
                 chat_list_id,
-                data.user_type,
+                "user",
                 data.statement,
             )
     except WebSocketDisconnect:

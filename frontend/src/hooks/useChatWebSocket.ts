@@ -20,7 +20,7 @@ export function useChatWebSocket({
   }, [onEvent]);
 
   const sendMessage = useCallback(
-    (statement: string, userType: "user" | "system") => {
+    (statement: string) => {
       if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
         return false;
       }
@@ -28,7 +28,7 @@ export function useChatWebSocket({
         JSON.stringify({
           action: "send",
           statement,
-          user_type: userType,
+          
         })
       );
       return true;

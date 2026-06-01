@@ -60,7 +60,18 @@ function Chatbot() {
 
     if (event.type === "message") {
       setLiveMessages((prev) => {
-        if (prev.some((item) => item.tempId === event.temp_id)) return prev;
+        const index = prev.findIndex((item) => item.tempId === event.temp_id);
+        if (index >= 0) {
+          const next = [...prev];
+          next[index] = {
+            ...next[index],
+            user_type: normalizeUserType(event.user_type),
+            statement: event.statement,
+            streaming: false,
+            id: event.id,
+          };
+          return next;
+        }
         return [
           ...prev,
           {
