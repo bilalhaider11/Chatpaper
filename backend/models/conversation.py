@@ -18,6 +18,7 @@ class ConversationList(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    file_id = Column(Integer, ForeignKey("files_data.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=False), server_default=func.now(), nullable=False)
 
     conversation_title= Column("conversation_title", String(150), nullable=False)

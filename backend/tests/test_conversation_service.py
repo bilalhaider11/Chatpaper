@@ -16,13 +16,36 @@ def _make_user(user_id: int = 1) -> MagicMock:
 
 
 class TestCreateConversationList:
-    def test_creates_with_correct_user_id(self):
+    def test_creates_with_correct_user_id_and_file(self, mocker):
         from services.conversation import create_conversation_list
+
+        file_record = MagicMock()
+        file_record.id = 10
+        file_record.filename = "paper.pdf"
+        mocker.patch(
+            "services.conversation._get_owned_file_for_user",
+            return_value=file_record,
+        )
+
         db = MagicMock()
-        create_conversation_list(_make_user(user_id=3), db)
+        create_conversation_list(_make_user(user_id=3), db, file_id=10)
         added = db.add.call_args[0][0]
         assert added.user_id == 3
+        assert added.file_id == 10
+        assert added.conversation_title == "paper.pdf"
         assert added.is_active is True
+
+    def test_missing_file_raises_400(self, mocker):
+        from services.conversation import create_conversation_list
+
+        mocker.patch(
+            "services.conversation._get_owned_file_for_user",
+            side_effect=HTTPException(status_code=400, detail="file required"),
+        )
+        db = MagicMock()
+        with pytest.raises(HTTPException) as exc:
+            create_conversation_list(_make_user(), db, file_id=99)
+        assert exc.value.status_code == 400
 
 
 class TestUpdateConversationTitle:

@@ -67,6 +67,8 @@ def bulk_insert_messages(db: Session, messages: list[QueuedChatMessage]) -> list
             chat_id=msg.chat_id,
             user_type=msg.user_type,
             statement=msg.statement,
+            # Keep DB-created ordering consistent with Redis pending timestamps.
+            created_at=datetime.fromisoformat(msg.enqueued_at).astimezone(timezone.utc).replace(tzinfo=None),
         )
         
         for msg in messages

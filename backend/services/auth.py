@@ -58,7 +58,6 @@ async def consume_google_login_code(code: str) -> dict[str, str | int]:
 
     try:
         data = json.loads(payload)
-        print("Parsed login code data: ", data)
     except json.JSONDecodeError as exc:
         raise LoginCodeInvalidError("Invalid login code payload") from exc
 

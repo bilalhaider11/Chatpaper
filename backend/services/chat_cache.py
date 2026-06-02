@@ -27,6 +27,9 @@ def _pending_key(chat_id: int) -> str:
 def _stream_key(chat_id: int, temp_id: str) -> str:
     return f"chat:stream:{chat_id}:{temp_id}"
 
+def _stream_started_at_key(chat_id: int, temp_id: str) -> str:
+    return f"chat:stream:{chat_id}:{temp_id}:started_at"
+
 
 def _message_to_json(message: QueuedChatMessage) -> str:
     return json.dumps(asdict(message))
@@ -48,6 +51,7 @@ class InMemoryChatCache:
         self._flush_queue: list[str] = []
         self._pending: dict[int, list[str]] = {}
         self._streams: dict[str, str] = {}
+        self._stream_started_at: dict[str, str] = {}
 
     async def enqueue(self, message: QueuedChatMessage) -> None:
         payload = _message_to_json(message)
@@ -73,7 +77,8 @@ class InMemoryChatCache:
 
     async def append_stream_chunk(self, chat_id: int, temp_id: str, chunk: str) -> None:
         key = _stream_key(chat_id, temp_id)
-        
+        if key not in self._streams:
+            self._stream_started_at[key] = datetime.now(timezone.utc).isoformat()
         self._streams[key] = self._streams.get(key, "") + chunk
 
     async def get_active_streams(self, chat_id: int) -> list[dict]:
@@ -89,12 +94,15 @@ class InMemoryChatCache:
                     "user_type": "system",
                     "statement": statement,
                     "streaming": True,
+                    "created_at": self._stream_started_at.get(key),
                 }
             )
         return results
 
     async def clear_stream(self, chat_id: int, temp_id: str) -> None:
-        self._streams.pop(_stream_key(chat_id, temp_id), None)
+        key = _stream_key(chat_id, temp_id)
+        self._streams.pop(key, None)
+        self._stream_started_at.pop(key, None)
 
 
 _memory_cache = InMemoryChatCache()
@@ -149,6 +157,7 @@ async def get_pending_messages(chat_id: int) -> list[QueuedChatMessage]:
         return await _memory_cache.get_pending(chat_id)
 
     payloads = await redis_client.lrange(_pending_key(chat_id), 0, -1)
+    
     return [_message_from_json(item) for item in payloads]
 
 
@@ -159,10 +168,14 @@ async def append_stream_chunk(chat_id: int, temp_id: str, chunk: str) -> None:
         return
 
     key = _stream_key(chat_id, temp_id)
-    print("key: ",key)
+    started_at_key = _stream_started_at_key(chat_id, temp_id)
     pipe = redis_client.pipeline()
+    started_at = datetime.now(timezone.utc).isoformat()
+    # Record the first-seen timestamp once per stream for stable sorting.
+    pipe.setnx(started_at_key, started_at)
     pipe.append(key, chunk)
     pipe.expire(key, settings.chat_stream_ttl_seconds)
+    pipe.expire(started_at_key, settings.chat_stream_ttl_seconds)
     await pipe.execute()
 
 
@@ -178,12 +191,15 @@ async def get_active_streams(chat_id: int) -> list[dict]:
         if not statement:
             continue
         temp_id = key.removeprefix(prefix)
+        started_at_key = _stream_started_at_key(chat_id, temp_id)
+        created_at = await redis_client.get(started_at_key)
         results.append(
             {
                 "temp_id": temp_id,
                 "user_type": "system",
                 "statement": statement,
                 "streaming": True,
+                "created_at": created_at,
             }
         )
     return results
@@ -194,4 +210,4 @@ async def clear_stream(chat_id: int, temp_id: str) -> None:
     if redis_client is None:
         await _memory_cache.clear_stream(chat_id, temp_id)
         return
-    await redis_client.delete(_stream_key(chat_id, temp_id))
+    await redis_client.delete(_stream_key(chat_id, temp_id), _stream_started_at_key(chat_id, temp_id))

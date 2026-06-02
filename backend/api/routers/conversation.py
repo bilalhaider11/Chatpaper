@@ -1,7 +1,7 @@
 import asyncio
 import json
+from datetime import datetime, timezone
 from uuid import uuid4
-from services.files import get_file_by_user_id
 from fastapi import APIRouter, Body, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from services.chat_cache import append_stream_chunk, clear_stream
@@ -11,7 +11,10 @@ from core.dependencies import get_db
 from models.conversation import ConversationList
 from schema.conversation import (
     ChatWsSendPayload,
+    ConversationCreate,
+    ConversationListCreate,
     ConversationListResponse,
+    ConversationPageResponse,
     ConversationResponse,
 )
 from core.redis_client import get_redis
@@ -28,7 +31,13 @@ from services.messaging import (
 router = APIRouter(prefix="/conversation", tags=["conversation"])
 
 
-async def _stream_system_message(chat_list_id: int, statement: str, temp_id: str, user_type:str) -> None:
+async def _stream_system_message(
+    chat_list_id: int,
+    statement: str,
+    temp_id: str,
+    user_type: str,
+    created_at: str,
+) -> None:
     chunk_size = settings.chat_stream_chunk_size
     for index in range(0, len(statement), chunk_size):
         chunk = statement[index : index + chunk_size]
@@ -41,6 +50,7 @@ async def _stream_system_message(chat_list_id: int, statement: str, temp_id: str
                 "user_type": user_type,
                 "chunk": chunk,
                 "chat_id": chat_list_id,
+                "created_at": created_at,
             },
         )
         await asyncio.sleep(0.03)
@@ -54,9 +64,10 @@ async def _handle_outgoing_message(chat_list_id: int, user_type: str, statement:
     statement = statement.strip()
     if not statement:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
+    created_at = datetime.now(timezone.utc).isoformat()
 
     if user_type == USER_TYPE_SYSTEM:
-        await _stream_system_message(chat_list_id, statement, temp_id, user_type)
+        await _stream_system_message(chat_list_id, statement, temp_id, user_type, created_at)
         
     await manager.broadcast(
         chat_list_id,
@@ -66,6 +77,7 @@ async def _handle_outgoing_message(chat_list_id: int, user_type: str, statement:
             "user_type": user_type,
             "statement": statement,
             "chat_id": chat_list_id,
+            "created_at": created_at,
         },
     )
 
@@ -87,10 +99,13 @@ def _get_owned_convo(db: Session, convo_id: int, user: User) -> ConversationList
 
 @router.post("/inconversationlist", response_model=ConversationListResponse)
 async def conversation_list(
+    body: ConversationListCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return conversation_service.create_conversation_list(current_user, db)
+    return conversation_service.create_conversation_list(
+        current_user, db, file_id=body.file_id
+    )
 
 
 @router.patch("/conversation-title/{conversation_id}")
@@ -112,31 +127,20 @@ async def get_conversation_list(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    conversations = (
+    return (
         db.query(ConversationList)
         .filter(
             ConversationList.is_active == True,
             ConversationList.user_id == current_user.id,
         )
+        .order_by(ConversationList.id.desc())
         .all()
     )
-    if conversations:
-        return conversations
-
-    user_file = get_file_by_user_id(current_user.id, db)
-    if not user_file:
-        return []
-
-    conversation = conversation_service.create_conversation_list(
-        current_user,
-        db,
-    )
-    return [conversation]        
 
 @router.post("/conversation/{chat_id}", response_model=ConversationResponse)
 async def conversation(
     chat_id: int,
-    data: ConversationResponse,
+    data: ConversationCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -144,14 +148,18 @@ async def conversation(
     return conversation_service.add_conversation(data, chat_id, db)
 
 
-@router.get("/get-conversation/{chat_list_id}", response_model=list[ConversationResponse])
+@router.get("/get-conversation/{chat_list_id}", response_model=ConversationPageResponse)
 async def get_conversation(
     chat_list_id: int,
+    cursor_id: int | None = None,
+    limit: int = 25,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    #_get_owned_convo(db, chat_list_id, current_user)
-    return await conversation_service.get_conversations(chat_list_id, db)
+   _get_owned_convo(db, chat_list_id, current_user)
+    return await conversation_service.get_conversations(
+        chat_list_id, db, limit=limit, cursor_id=cursor_id
+    )
 
 
 @router.delete("/delete_list/{list_id}")
@@ -193,7 +201,8 @@ async def websocket_chat_endpoint(
             raw = await websocket.receive_text()
             try:
                 payload = json.loads(raw)
-                payload['user_type'] = 'user'
+                if not isinstance(payload, dict) or "user_type" not in payload:
+                    payload['user_type'] = "user"
                 data = ChatWsSendPayload(**payload)
             except Exception:
                 await websocket.send_text(
@@ -206,7 +215,7 @@ async def websocket_chat_endpoint(
 
             await _handle_outgoing_message(
                 chat_list_id,
-                "user",
+                data.user_type,
                 data.statement,
             )
     except WebSocketDisconnect:

@@ -14,7 +14,7 @@ import FilePreview from "./FilePreview";
 type FileUploadProps = {
   variant?: "embedded" | "modal";
   onClose?: () => void;
-  onUploadSuccess?: () => Promise<void> | void;
+  onUploadSuccess?: (file: FileRecord) => Promise<void> | void;
   showFileList?: boolean;
   subtitle?: string;
 };
@@ -82,8 +82,10 @@ function FileUpload({
 
     let uploaded = false;
 
+    let uploadedFile: FileRecord | null = null;
+
     try {
-      await uploadFile(selectedFile, description);
+      uploadedFile = await uploadFile(selectedFile, description);
       uploaded = true;
       setMessage("File uploaded successfully.");
       setSelectedFile(null);
@@ -95,14 +97,14 @@ function FileUpload({
       setUploading(false);
     }
 
-    if (!uploaded) return;
+    if (!uploaded || !uploadedFile) return;
 
     if (showFileList) {
       void loadFiles();
     }
 
     try {
-      await onUploadSuccess?.();
+      await onUploadSuccess?.(uploadedFile);
       if (variant === "modal") {
         onClose?.();
       }

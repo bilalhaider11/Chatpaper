@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import FileUpload from "../../components/fileUpload/FileUpload";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
-import { createConversationList } from "../../services/conversation_api";
 
 type HomeProps = {
   onLogout: () => void;
@@ -37,13 +36,8 @@ function Home({ onLogout }: HomeProps) {
     void bootstrap();
   }, [navigate]);
 
-  const handleStartChat = async () => {
-    try {
-      await createConversationList();
-      navigate("/chatbot");
-    } catch {
-      setMessage("Failed to start chat.");
-    }
+  const handleStartChat = () => {
+    navigate("/chatbot");
   };
 
   const logout = () => {
@@ -110,13 +104,13 @@ function Home({ onLogout }: HomeProps) {
           {message ? <p className="mt-4 text-sm text-blue-300">{message}</p> : null}
         </div>
 
-        <div className="flex items-center border-t border-slate-400/20 p-6 sm:border-t-0 sm:border-l sm:p-10">
+       { /*<div className="flex items-center border-t border-slate-400/20 p-6 sm:border-t-0 sm:border-l sm:p-10">
           <FileUpload
             variant="embedded"
             showFileList
-            subtitle="Files are saved in backend `/files` and metadata is stored in DB."
-          />
-        </div>
+            subtitle="Upload a file on the chatbot page to start a conversation. Each chat requires its own upload."
+          /> 
+        </div>*/}
       </div>
     </div>
   );
