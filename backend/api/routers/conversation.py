@@ -124,7 +124,7 @@ async def update_conversation_title(
     db: AsyncSession = Depends(get_db),
 ):
     await _get_owned_convo(db, conversation_id, current_user)
-    return await conversation_service.update_conversation_title(title, conversation_id, db)
+    return await conversation_service.update_conversation_title(title, conversation_id, current_user.id, db)
 
 
 @router.get(
@@ -168,7 +168,7 @@ async def delete_conversation_list(
     db: AsyncSession = Depends(get_db),
 ):
     await _get_owned_convo(db, list_id, current_user)
-    return await conversation_service.delete_conversation_list(list_id, db)
+    return await conversation_service.delete_conversation(list_id, db)
 
 
 async def _redis_listener(channel: str, websocket: WebSocket) -> None:
@@ -206,9 +206,17 @@ async def _redis_listener(channel: str, websocket: WebSocket) -> None:
 async def websocket_chat_endpoint(
     websocket: WebSocket,
     chat_list_id: int,
-    token: str | None = None,
 ):
-    if not token:
+    await websocket.accept()
+
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+        auth_payload = json.loads(raw)
+        if auth_payload.get("action") != "auth" or not auth_payload.get("token"):
+            await websocket.close(code=4401)
+            return
+        token: str = auth_payload["token"]
+    except Exception:
         await websocket.close(code=4401)
         return
 
@@ -222,7 +230,7 @@ async def websocket_chat_endpoint(
             await websocket.close(code=4401)
             return
 
-    await manager.connect(websocket, chat_list_id)
+    manager.register(websocket, chat_list_id)
     listener_task = asyncio.create_task(
         _redis_listener(manager.room_channel(chat_list_id), websocket)
     )

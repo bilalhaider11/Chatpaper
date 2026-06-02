@@ -71,6 +71,6 @@ export async function fetchCurrentUser() {
   return response.data;
 }
 
-export function toFileUrl(path: string) {
-  return `http://127.0.0.1:8000${path}`;
+export function toFileUrl(fileId: number) {
+  return `${API_BASE_URL}/files/${fileId}/download`;
 }

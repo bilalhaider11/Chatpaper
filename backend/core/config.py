@@ -128,6 +128,9 @@ class Settings(BaseModel):
     # Set true in production so the session cookie is only sent over HTTPS.
     session_https_only: bool = os.getenv("SESSION_HTTPS_ONLY", "false").lower() == "true"
 
+    # Comma-separated trusted proxy IPs for X-Forwarded-For; set to your LB IP(s) in production.
+    trusted_proxy_ips: str = os.getenv("TRUSTED_PROXY_IPS", "*")
+
     # admin panel credentials (required — missing values fail startup)
     admin_username: str = os.getenv("ADMIN_USERNAME", "")
     admin_password: str = os.getenv("ADMIN_PASSWORD", "")

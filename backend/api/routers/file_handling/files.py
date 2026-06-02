@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from starlette.responses import FileResponse
@@ -113,7 +114,7 @@ async def download_file(
         path=str(disk_path),
         filename=record.filename,
         media_type=record.file_type or "application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{record.filename}"'},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(record.filename)}"},
     )
 
 

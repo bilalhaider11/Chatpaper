@@ -47,155 +47,201 @@ async def upload_files(file: UploadFile, db: AsyncSession, current_user: User, d
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
 
-    generated_name = f"{uuid4().hex}_{file.filename}"
+    # Strip any directory components from the client-supplied name to prevent
+    # path traversal (e.g. "../../etc/cron.d/evil").
+    safe_name = Path(file.filename).name or "upload"
+    generated_name = f"{uuid4().hex}_{safe_name}"
     saved_path = UPLOAD_DIR / generated_name
+    if not saved_path.resolve().is_relative_to(UPLOAD_DIR.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
 
     file_hash = await asyncio.to_thread(_save_and_hash, file.file, saved_path)
+    # _committed becomes True once the FileRecord is durably committed. After
+    # that point saved_path is DB-owned and must not be deleted on exception.
+    _committed = False
+    try:
+        # Per-user disk quota — reject before any DB work if over limit
+        used_bytes: int = 0
+        limit_bytes: int = 0
+        if settings.max_user_storage_mb > 0:
+            # pg_advisory_xact_lock serializes concurrent uploads per user so the
+            # quota read + insert are atomic. Released on transaction end.
+            await db.execute(
+                text("SELECT pg_advisory_xact_lock(:uid)").bindparams(uid=current_user.id)
+            )
+            result = await db.execute(
+                select(func.sum(FileRecord.filesize)).where(
+                    FileRecord.user_id == current_user.id,
+                    FileRecord.is_active == True,  # noqa: E712
+                )
+            )
+            used_bytes = result.scalar() or 0
+            limit_bytes = settings.max_user_storage_mb * 1024 * 1024
+            if used_bytes + saved_path.stat().st_size > limit_bytes:
+                saved_path.unlink(missing_ok=True)
+                used_mb = used_bytes // (1024 * 1024)
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"Storage quota exceeded. "
+                        f"You are using {used_mb} MB of {settings.max_user_storage_mb} MB allowed."
+                    ),
+                )
 
-    # Per-user disk quota — reject before any DB work if over limit
-    if settings.max_user_storage_mb > 0:
-        # pg_advisory_xact_lock serializes concurrent uploads per user so the
-        # quota read + insert are atomic. Released on transaction end.
-        await db.execute(
-            text("SELECT pg_advisory_xact_lock(:uid)").bindparams(uid=current_user.id)
-        )
+        # Active duplicate — same content already live for this user
         result = await db.execute(
-            select(func.sum(FileRecord.filesize)).where(
+            select(FileRecord).where(
                 FileRecord.user_id == current_user.id,
+                FileRecord.file_hash == file_hash,
                 FileRecord.is_active == True,  # noqa: E712
             )
         )
-        used_bytes: int = result.scalar() or 0
-        limit_bytes = settings.max_user_storage_mb * 1024 * 1024
-        if used_bytes + saved_path.stat().st_size > limit_bytes:
+        active_dup = result.scalars().first()
+        if active_dup is not None:
             saved_path.unlink(missing_ok=True)
-            used_mb = used_bytes // (1024 * 1024)
+            convo_result = await db.execute(
+                select(ConversationList).where(
+                    ConversationList.file_id == active_dup.id,
+                    ConversationList.is_active == True,  # noqa: E712
+                )
+            )
+            convo = convo_result.scalars().first()
             raise HTTPException(
-                status_code=413,
-                detail=(
-                    f"Storage quota exceeded. "
-                    f"You are using {used_mb} MB of {settings.max_user_storage_mb} MB allowed."
-                ),
+                status_code=409,
+                detail={
+                    "message": "This file already exists in your library.",
+                    "file_id": active_dup.id,
+                    "conversation_id": convo.id if convo else None,
+                },
             )
 
-    # Active duplicate — same content already live for this user
-    result = await db.execute(
-        select(FileRecord).where(
-            FileRecord.user_id == current_user.id,
-            FileRecord.file_hash == file_hash,
-            FileRecord.is_active == True,  # noqa: E712
-        )
-    )
-    active_dup = result.scalars().first()
-    if active_dup is not None:
-        saved_path.unlink(missing_ok=True)
-        convo_result = await db.execute(
-            select(ConversationList).where(
-                ConversationList.file_id == active_dup.id,
-                ConversationList.is_active == True,  # noqa: E712
+        # Soft-deleted duplicate — reactivate and create a new conversation, no re-ingestion needed
+        result = await db.execute(
+            select(FileRecord).where(
+                FileRecord.user_id == current_user.id,
+                FileRecord.file_hash == file_hash,
+                FileRecord.is_active == False,  # noqa: E712
             )
         )
-        convo = convo_result.scalars().first()
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": "This file already exists in your library.",
-                "file_id": active_dup.id,
-                "conversation_id": convo.id if convo else None,
-            },
+        soft_dup = result.scalars().first()
+
+        if soft_dup is not None:
+            soft_dup_disk_path = UPLOAD_DIR / Path(soft_dup.filepath).name
+            if not soft_dup_disk_path.exists():
+                # Disk file was cleaned up manually; treat as a new upload instead of reactivating.
+                soft_dup = None
+
+        if soft_dup is not None:
+            if settings.max_user_storage_mb > 0 and used_bytes + soft_dup.filesize > limit_bytes:
+                saved_path.unlink(missing_ok=True)
+                used_mb = used_bytes // (1024 * 1024)
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Storage quota exceeded. You are using {used_mb} MB of {settings.max_user_storage_mb} MB allowed.",
+                )
+            saved_path.unlink(missing_ok=True)
+            soft_dup.is_active = True
+            convo = ConversationList(
+                user_id=current_user.id,
+                conversation_title=file.filename,
+                conversation_type="per_file",
+                file_id=soft_dup.id,
+                is_active=True,
+            )
+            db.add(convo)
+            await db.commit()
+            await db.refresh(soft_dup)
+            await db.refresh(convo)
+            return UploadResponse(
+                id=soft_dup.id,
+                filename=soft_dup.filename,
+                filesize=soft_dup.filesize,
+                ingestion_status=soft_dup.ingestion_status,
+                conversation_id=convo.id,
+                reactivated=True,
+            )
+
+        # New file — create FileRecord + per_file conversation atomically
+        db_record = FileRecord(
+            user_id=current_user.id,
+            filename=file.filename,
+            filepath=f"/files/{generated_name}",
+            file_type=file.content_type,
+            filesize=saved_path.stat().st_size,
+            description=description,
+            ingestion_status=IngestionJob.STATUS_QUEUED,
+            file_hash=file_hash,
         )
+        db.add(db_record)
 
-    # Soft-deleted duplicate — reactivate and create a new conversation, no re-ingestion needed
-    result = await db.execute(
-        select(FileRecord).where(
-            FileRecord.user_id == current_user.id,
-            FileRecord.file_hash == file_hash,
-            FileRecord.is_active == False,  # noqa: E712
-        )
-    )
-    soft_dup = result.scalars().first()
+        try:
+            await db.flush()  # assigns db_record.id; raises IntegrityError on hash collision
+        except IntegrityError:
+            await db.rollback()
+            saved_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=409, detail="A file with this content was just uploaded.")
 
-    if soft_dup is not None:
-        soft_dup_disk_path = UPLOAD_DIR / Path(soft_dup.filepath).name
-        if not soft_dup_disk_path.exists():
-            # Disk file was cleaned up manually; treat as a new upload instead of reactivating.
-            soft_dup = None
-
-    if soft_dup is not None:
-        saved_path.unlink(missing_ok=True)
-        soft_dup.is_active = True
         convo = ConversationList(
             user_id=current_user.id,
             conversation_title=file.filename,
             conversation_type="per_file",
-            file_id=soft_dup.id,
+            file_id=db_record.id,
             is_active=True,
         )
         db.add(convo)
-        await db.commit()
-        await db.refresh(soft_dup)
+
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            saved_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=409, detail="A file with this content was just uploaded.")
+        _committed = True  # FileRecord committed — saved_path is now DB-owned
+
+        await db.refresh(db_record)
         await db.refresh(convo)
-        return UploadResponse(
-            id=soft_dup.id,
-            filename=soft_dup.filename,
-            filesize=soft_dup.filesize,
-            ingestion_status=soft_dup.ingestion_status,
-            conversation_id=convo.id,
-            reactivated=True,
+
+        # don't dispatch a second task if a rapid client retry beats us here
+        result = await db.execute(
+            select(IngestionJob).where(
+                IngestionJob.file_id == db_record.id,
+                IngestionJob.status.notin_(_TERMINAL_STATUSES),
+            )
         )
+        existing_job = result.scalars().first()
+        if existing_job is not None:
+            logger.warning(
+                "Active ingestion job %s already exists for file %s; skipping duplicate dispatch.",
+                existing_job.id, db_record.id,
+            )
+            return UploadResponse(
+                id=db_record.id,
+                filename=db_record.filename,
+                filesize=db_record.filesize,
+                ingestion_status=db_record.ingestion_status,
+                conversation_id=convo.id,
+            )
 
-    # New file — create FileRecord + per_file conversation atomically
-    db_record = FileRecord(
-        user_id=current_user.id,
-        filename=file.filename,
-        filepath=f"/files/{generated_name}",
-        file_type=file.content_type,
-        filesize=saved_path.stat().st_size,
-        description=description,
-        ingestion_status=IngestionJob.STATUS_QUEUED,
-        file_hash=file_hash,
-    )
-    db.add(db_record)
+        try:
+            job = IngestionJob(file_id=db_record.id, status=IngestionJob.STATUS_QUEUED)
+            db.add(job)
+            await db.commit()
+            await db.refresh(job)
+        except IntegrityError:
+            await db.rollback()
+            logger.warning("IntegrityError creating IngestionJob for file %s; duplicate guard hit.", db_record.id)
+            return UploadResponse(
+                id=db_record.id,
+                filename=db_record.filename,
+                filesize=db_record.filesize,
+                ingestion_status=db_record.ingestion_status,
+                conversation_id=convo.id,
+            )
 
-    try:
-        await db.flush()  # assigns db_record.id; raises IntegrityError on hash collision
-    except IntegrityError:
-        await db.rollback()
-        saved_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=409, detail="A file with this content was just uploaded.")
-
-    convo = ConversationList(
-        user_id=current_user.id,
-        conversation_title=file.filename,
-        conversation_type="per_file",
-        file_id=db_record.id,
-        is_active=True,
-    )
-    db.add(convo)
-
-    try:
+        result_task = run_ingestion.delay(job.id, db_record.id)
+        job.celery_task_id = result_task.id
         await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        saved_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=409, detail="A file with this content was just uploaded.")
 
-    await db.refresh(db_record)
-    await db.refresh(convo)
-
-    # don't dispatch a second task if a rapid client retry beats us here
-    result = await db.execute(
-        select(IngestionJob).where(
-            IngestionJob.file_id == db_record.id,
-            IngestionJob.status.notin_(_TERMINAL_STATUSES),
-        )
-    )
-    existing_job = result.scalars().first()
-    if existing_job is not None:
-        logger.warning(
-            "Active ingestion job %s already exists for file %s; skipping duplicate dispatch.",
-            existing_job.id, db_record.id,
-        )
         return UploadResponse(
             id=db_record.id,
             filename=db_record.filename,
@@ -203,34 +249,10 @@ async def upload_files(file: UploadFile, db: AsyncSession, current_user: User, d
             ingestion_status=db_record.ingestion_status,
             conversation_id=convo.id,
         )
-
-    try:
-        job = IngestionJob(file_id=db_record.id, status=IngestionJob.STATUS_QUEUED)
-        db.add(job)
-        await db.commit()
-        await db.refresh(job)
-    except IntegrityError:
-        await db.rollback()
-        logger.warning("IntegrityError creating IngestionJob for file %s; duplicate guard hit.", db_record.id)
-        return UploadResponse(
-            id=db_record.id,
-            filename=db_record.filename,
-            filesize=db_record.filesize,
-            ingestion_status=db_record.ingestion_status,
-            conversation_id=convo.id,
-        )
-
-    result_task = run_ingestion.delay(job.id, db_record.id)
-    job.celery_task_id = result_task.id
-    await db.commit()
-
-    return UploadResponse(
-        id=db_record.id,
-        filename=db_record.filename,
-        filesize=db_record.filesize,
-        ingestion_status=db_record.ingestion_status,
-        conversation_id=convo.id,
-    )
+    except Exception:
+        if not _committed:
+            saved_path.unlink(missing_ok=True)
+        raise
 
 
 async def delete_file(file_id: int, user_id: int | None, db: AsyncSession) -> dict:

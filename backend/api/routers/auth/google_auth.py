@@ -56,10 +56,7 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
         token = await oauth.google.authorize_access_token(request)
     except Exception as exc:
         logger.exception("Google token exchange failed")
-        raise HTTPException(
-            status_code=401,
-            detail=f"Google authentication failed: {exc}",
-        ) from exc
+        raise HTTPException(status_code=401, detail="Google authentication failed.") from exc
 
     user_info = token.get("userinfo")
     if not user_info and token.get("access_token"):

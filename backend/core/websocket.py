@@ -22,6 +22,10 @@ class ConnectionManager:
         await websocket.accept()
         self.rooms[self.room_key(chat_list_id)].append(websocket)
 
+    def register(self, websocket: WebSocket, chat_list_id: int) -> None:
+        """Register an already-accepted WebSocket without calling accept() again."""
+        self.rooms[self.room_key(chat_list_id)].append(websocket)
+
     def disconnect(self, websocket: WebSocket, chat_list_id: int) -> None:
         key = self.room_key(chat_list_id)
         if websocket in self.rooms[key]:

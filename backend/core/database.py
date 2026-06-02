@@ -5,8 +5,13 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from core.config import settings
 
 SQLALCHEMY_DATABASE_URL = settings.database
-# asyncpg requires the postgresql+asyncpg:// scheme
-_ASYNC_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+# asyncpg requires the postgresql+asyncpg:// scheme; handle all common variants.
+_ASYNC_DATABASE_URL = (
+    SQLALCHEMY_DATABASE_URL
+    .replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+    .replace("postgresql://", "postgresql+asyncpg://", 1)
+    .replace("postgres://", "postgresql+asyncpg://", 1)
+)
 
 # Sync engine — used by Celery tasks, Alembic migrations, and sqladmin.
 engine = create_engine(

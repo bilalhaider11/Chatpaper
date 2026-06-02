@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { getChatWebSocketUrl, ChatWsEvent } from "../services/conversation_api";
+import { tokenStore } from "../api/axios";
 
 type UseChatWebSocketOptions = {
   chatListId: number | null;
@@ -44,6 +45,10 @@ export function useChatWebSocket({
     const url = getChatWebSocketUrl(chatListId);
     const socket = new WebSocket(url);
     socketRef.current = socket;
+
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ action: "auth", token: tokenStore.getToken() ?? "" }));
+    };
 
     socket.onmessage = (event) => {
       try {

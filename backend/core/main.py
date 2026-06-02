@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
     cfg.set_main_option("script_location", str(_ini.parent / "alembic"))
     cfg.set_main_option("sqlalchemy.url", settings.database)
     if settings.run_migrations_on_startup:
-        command.upgrade(cfg, "head")
+        await asyncio.to_thread(command.upgrade, cfg, "head")
     await start_redis()
     await start_messaging()
     yield
@@ -41,8 +42,12 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 if settings.trust_proxy_headers:
-    # Populate request.client from X-Forwarded-For so slowapi rate limits by real client IP.
-    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+    _trusted = (
+        settings.trusted_proxy_ips
+        if settings.trusted_proxy_ips == "*"
+        else [ip.strip() for ip in settings.trusted_proxy_ips.split(",") if ip.strip()]
+    )
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=_trusted)
 
 # SessionMiddleware is required by sqladmin's AuthenticationBackend.
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, session_cookie="session", same_site="lax", https_only=settings.session_https_only)

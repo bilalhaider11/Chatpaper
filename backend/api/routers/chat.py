@@ -1,6 +1,6 @@
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +24,7 @@ except ImportError:
     HumanMessage = None  # type: ignore[assignment,misc]
     SystemMessage = None  # type: ignore[assignment,misc]
 
+from core.limiter import limiter
 from core.llm import get_chat_llm
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -89,7 +90,9 @@ def _truncate_history(history: list, max_chars: int) -> list:
 
 
 @router.post("/{conversation_id}/ask", response_model=AskResponse)
+@limiter.limit("20/minute")
 async def ask(
+    request: Request,
     conversation_id: int,
     body: AskRequest,
     current_user=Depends(get_current_user),

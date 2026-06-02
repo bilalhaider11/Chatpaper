@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { exchangeOAuthCode, login, signup } from "../../api/axios";
 import { tokenStore } from "../../api/axios";
@@ -13,10 +13,11 @@ function Login({ onLoginSuccess }: LoginProps) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [email, setEmail] = useState("");
-  const [login_signup,setlogin_signup] = useState(false);
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Ref instead of state: read synchronously inside handleSubmit before re-render.
+  const actionRef = useRef<"login" | "signup">("login");
 
   useEffect(() => {
     const code = searchParams.get("code");
@@ -34,24 +35,30 @@ function Login({ onLoginSuccess }: LoginProps) {
       .finally(() => setLoading(false));
   }, [searchParams, setSearchParams, onLoginSuccess, navigate]);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: { preventDefault(): void }) => {
     event.preventDefault();
     setError("");
     setLoading(true);
 
-    try {
-      if (login_signup){
-        const response = await signup(email, password);
+    const isSignup = actionRef.current === "signup";
 
+    try {
+      if (isSignup) {
+        await signup(email, password);
       }
-      const login_res = await login(email, password);  
+      const login_res = await login(email, password);
       tokenStore.setToken(login_res.access_token);
       onLoginSuccess();
       navigate("/", { replace: true });
-      
-      
-    } catch {
-      setError("Invalid credentials. Please try again.");
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (isSignup && status === 400) {
+        setError("Email already registered.");
+      } else if (isSignup && status === 403) {
+        setError("Registration is currently closed.");
+      } else {
+        setError("Invalid credentials. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -78,10 +85,10 @@ function Login({ onLoginSuccess }: LoginProps) {
         />
         {error ? <p className="login-error">{error}</p> : null}
         <>
-        <button onClick={() => setlogin_signup(false)} type="submit" disabled={loading}>
+        <button type="submit" onClick={() => { actionRef.current = "login"; }} disabled={loading}>
           {loading ? "Signing in..." : "Login"}
         </button>
-        <button onClick={() => setlogin_signup(true)} type="submit" disabled={loading}>
+        <button type="submit" onClick={() => { actionRef.current = "signup"; }} disabled={loading}>
           {loading ? "Signing up..." : "Signup"}
         </button>
         <div className="login-divider">or</div>

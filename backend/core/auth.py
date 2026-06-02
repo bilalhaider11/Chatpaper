@@ -102,6 +102,8 @@ async def get_current_user(
         if user_id is not None:
             cached = await _get_cached_user(user_id)
             if cached is not None:
+                if not cached.is_active:
+                    raise credentials_exception
                 return cached
 
         user = await auth.get_user_by_email(db, current_email)
