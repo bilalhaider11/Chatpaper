@@ -1,7 +1,6 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import create_engine, inspect, pool, text
 
 from alembic import context
 
@@ -66,13 +65,21 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    # Use settings.database — engine_from_config would read alembic.ini (often localhost).
+    connectable = create_engine(settings.database, poolclass=pool.NullPool)
 
-    with connectable.connect() as connection:
+    # engine.begin() commits on success; connect() alone can roll back migrations on exit.
+    with connectable.begin() as connection:
+        if connection.dialect.name == "postgresql" and inspect(connection).has_table(
+            "alembic_version"
+        ):
+            connection.execute(
+                text(
+                    "ALTER TABLE alembic_version "
+                    "ALTER COLUMN version_num TYPE VARCHAR(64)"
+                )
+            )
+
         context.configure(
             connection=connection, target_metadata=target_metadata
         )

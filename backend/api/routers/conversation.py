@@ -2,12 +2,14 @@ import asyncio
 import contextlib
 import json
 import logging
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from services.chat_cache import append_stream_chunk, clear_stream
 from core.auth import get_current_user
 from core.config import settings
 from core.database import AsyncSessionLocal
@@ -17,12 +19,12 @@ from models.auth import User, UserRole
 from models.conversation import ConversationList
 from schema.conversation import (
     ChatWsSendPayload,
-    ConversationCreateRequest,
+    ConversationListCreate,
     ConversationListResponse,
-    ConversationResponse,
+    ConversationPageResponse,
+    ConversationTitleUpdate,
 )
 from services import conversation as conversation_service
-from services.chat_cache import append_stream_chunk, clear_stream
 from services.messaging import (
     USER_TYPE_SYSTEM,
     publish_chat_message,
@@ -33,7 +35,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversation", tags=["conversation"])
 
 
-async def _stream_system_message(chat_list_id: int, statement: str, temp_id: str, user_type: str) -> None:
+async def _stream_system_message(
+    chat_list_id: int,
+    statement: str,
+    temp_id: str,
+    user_type: str,
+    created_at: str,
+) -> None:
     chunk_size = settings.chat_stream_chunk_size
     for index in range(0, len(statement), chunk_size):
         chunk = statement[index : index + chunk_size]
@@ -46,6 +54,7 @@ async def _stream_system_message(chat_list_id: int, statement: str, temp_id: str
                 "user_type": user_type,
                 "chunk": chunk,
                 "chat_id": chat_list_id,
+                "created_at": created_at,
             },
         )
         await asyncio.sleep(0.03)
@@ -58,9 +67,10 @@ async def _handle_outgoing_message(chat_list_id: int, user_type: str, statement:
     statement = statement.strip()
     if not statement:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
+    created_at = datetime.now(timezone.utc).isoformat()
 
     if user_type == USER_TYPE_SYSTEM:
-        await _stream_system_message(chat_list_id, statement, temp_id, user_type)
+        await _stream_system_message(chat_list_id, statement, temp_id, user_type, created_at)
 
     await manager.broadcast(
         chat_list_id,
@@ -70,6 +80,7 @@ async def _handle_outgoing_message(chat_list_id: int, user_type: str, statement:
             "user_type": user_type,
             "statement": statement,
             "chat_id": chat_list_id,
+            "created_at": created_at,
         },
     )
 
@@ -97,34 +108,26 @@ async def _get_owned_convo(db: AsyncSession, convo_id: int, user: User) -> Conve
 
 @router.post("/inconversationlist", response_model=ConversationListResponse)
 async def conversation_list(
-    body: ConversationCreateRequest | None = Body(default=None),
+    body: ConversationListCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if body is None:
-        body = ConversationCreateRequest()
-    return await conversation_service.create_conversation_list(current_user, body, db)
-
-
-@router.delete("/{conversation_id}")
-async def delete_conversation(
-    conversation_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    await _get_owned_convo(db, conversation_id, current_user)
-    return await conversation_service.delete_conversation(conversation_id, db)
+    return await conversation_service.create_conversation_list(
+        current_user, db, file_id=body.file_id
+    )
 
 
 @router.patch("/conversation-title/{conversation_id}")
 async def update_conversation_title(
     conversation_id: int,
-    title: str = Body(..., embed=True),
+    body: ConversationTitleUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await _get_owned_convo(db, conversation_id, current_user)
-    return await conversation_service.update_conversation_title(title, conversation_id, current_user.id, db)
+    return await conversation_service.update_conversation_title(
+        body.resolved_title(), conversation_id, current_user.id, db
+    )
 
 
 @router.get(
@@ -137,28 +140,32 @@ async def get_conversation_list(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
+    stmt = (
         select(ConversationList)
         .where(
             ConversationList.is_active == True,  # noqa: E712
             ConversationList.user_id == current_user.id,
         )
-        .limit(limit)
+        .order_by(ConversationList.id.desc())
         .offset(offset)
+        .limit(limit)
     )
+    result = await db.execute(stmt)
     return result.scalars().all()
 
 
-@router.get("/get-conversation/{chat_list_id}", response_model=list[ConversationResponse])
+@router.get("/get-conversation/{chat_list_id}", response_model=ConversationPageResponse)
 async def get_conversation(
     chat_list_id: int,
     limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    cursor_id: int | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await _get_owned_convo(db, chat_list_id, current_user)
-    return await conversation_service.get_conversations(chat_list_id, db, limit=limit, offset=offset)
+    return await conversation_service.get_conversations(
+        chat_list_id, db, limit=limit, cursor_id=cursor_id
+    )
 
 
 @router.delete("/delete_list/{list_id}")
@@ -172,17 +179,13 @@ async def delete_conversation_list(
 
 
 async def _redis_listener(channel: str, websocket: WebSocket) -> None:
-    """Subscribe to a Redis pub/sub channel and forward messages to the WebSocket.
-
-    Retries on Redis errors so a transient Redis disconnect doesn't silently
-    kill the WebSocket. Exits permanently when the WebSocket closes or the
-    task is cancelled.
-    """
+    """Subscribe to a Redis pub/sub channel and forward messages to the WebSocket."""
     from core.redis_client import get_redis
+
     while True:
         redis = get_redis()
         if redis is None:
-            return  # no Redis; broadcast uses local fallback path
+            return
         pubsub = redis.pubsub()
         try:
             await pubsub.subscribe(channel)
@@ -191,7 +194,7 @@ async def _redis_listener(channel: str, websocket: WebSocket) -> None:
                     try:
                         await websocket.send_text(message["data"])
                     except Exception:
-                        return  # WebSocket closed
+                        return
         except asyncio.CancelledError:
             return
         except Exception:
@@ -239,6 +242,8 @@ async def websocket_chat_endpoint(
             raw = await websocket.receive_text()
             try:
                 payload = json.loads(raw)
+                if not isinstance(payload, dict) or "user_type" not in payload:
+                    payload["user_type"] = "user"
                 data = ChatWsSendPayload(**payload)
             except Exception:
                 await websocket.send_text(

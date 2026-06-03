@@ -1,17 +1,29 @@
-:root {
-  font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@import "tailwindcss";
+
+@theme {
+  --animate-blink: blink 1s step-end infinite;
 }
 
-#root {
-  width: 100%;
-  min-height: 100vh;
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
 }
 
-body {
-  margin: 0;
-  padding: 0;
+@layer base {
+  html {
+    font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply m-0 p-0;
+  }
+
+  #root {
+    @apply min-h-screen w-full;
+  }
 }

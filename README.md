@@ -42,7 +42,24 @@ Ask    → dense retrieval + BM25 + RRF fusion → GPT-4o-mini → cited answer
 
 ---
 
-## Quick Start
+## Quick Start (Docker)
+
+Run the entire stack with Docker (recommended if you don't want to install Postgres/Redis/Chroma locally):
+
+```bash
+cp backend/.env.docker.example backend/.env   # if you don't have .env yet
+# Edit backend/.env — set OPENAI_API_KEY, SECRET_KEY, ADMIN_PASSWORD
+
+docker compose up --build
+```
+
+- Frontend: http://localhost:5173  
+- API docs: http://localhost:8000/docs  
+- Full guide: [DOCKER.md](./DOCKER.md)
+
+---
+
+## Quick Start (manual)
 
 ### 1. Start external services
 

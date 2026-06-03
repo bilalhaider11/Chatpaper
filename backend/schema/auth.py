@@ -12,9 +12,8 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
-
 class UserLogin(UserBase):
-    password: str
+    auth_provider: str = "password"
 
 
 class User(UserBase):
@@ -36,3 +35,7 @@ class UserUpdate(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    
+
+class GoogleCodeExchange(BaseModel):
+    code: str

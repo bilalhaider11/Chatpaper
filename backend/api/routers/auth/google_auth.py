@@ -4,15 +4,15 @@ from datetime import timedelta
 
 import httpx
 from authlib.integrations.starlette_client import OAuth
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import create_access_token
 from core.config import settings
 from core.dependencies import get_db
-from core.redis_client import get_redis
 from services import auth as service_auth
+from schema import auth as schema_auth
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +32,26 @@ if settings.google_client_id and settings.google_client_secret:
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _callback_redirect_uri(request: Request) -> str:
-    return str(request.url_for("google_callback"))
+def _google_callback_url(request: Request) -> str:
+    """OAuth redirect URI registered in Google Cloud Console."""
+    configured = (settings.redirect_url or "").strip()
+    if configured.endswith(""):
+        return configured
+    
+    if configured:
+        return f"{configured.rstrip('/')}"
+    return str(request.url_for(""))
 
 
 @router.get("/google-login")
 async def google_login(request: Request):
-    if not settings.google_client_id:
-        raise HTTPException(status_code=501, detail="Google OAuth is not configured on this server.")
-    redirect_uri = _callback_redirect_uri(request)
+    if not settings.google_client_id or not settings.google_client_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Google sign-in is not configured (set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET).",
+        )
+
+    redirect_uri = _google_callback_url(request)
     request.session["oauth_redirect_uri"] = redirect_uri
     request.session["login_redirect"] = settings.frontend_url
     return await oauth.google.authorize_redirect(
@@ -50,7 +61,7 @@ async def google_login(request: Request):
     )
 
 
-@router.get("/google-callback")
+@router.get("")
 async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         token = await oauth.google.authorize_access_token(request)
@@ -80,38 +91,59 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
     if user_data is None:
         user_data = await service_auth.create_google_user(db, user_email)
 
-    role = user_data.role.value if hasattr(user_data.role, "value") else user_data.role
+    login_code = secrets.token_urlsafe(32)
 
+    try:
+        await service_auth.create_google_login_code(
+            login_code,
+            user_data,
+            ttl_seconds=settings.google_login_code_expire_seconds,
+        )
+    except service_auth.RedisUnavailableError as exc:
+        logger.exception("Redis unavailable while creating Google login code")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google authentication service temporarily unavailable.",
+        ) from exc
+
+    frontend_url = request.session.pop("login_redirect", settings.frontend_url)
+    redirect_target = f"{frontend_url.rstrip('/')}/login?code={login_code}"
+
+    return RedirectResponse(url=redirect_target, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/exchange-token", response_model=schema_auth.Token)
+async def exchange_google_login_code(
+    payload: schema_auth.GoogleCodeExchange,
+    db: AsyncSession = Depends(get_db),
+):
+    code = payload.code.strip()
+    if not code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Login code is required.")
+
+    try:
+        login_data = await service_auth.consume_google_login_code(code)
+    except service_auth.LoginCodeInvalidError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired login code.")
+    except service_auth.RedisUnavailableError as exc:
+        logger.exception("Redis unavailable while exchanging Google login code")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service temporarily unavailable.",
+        ) from exc
+
+    user = await service_auth.get_user_by_id(db, int(login_data["user_id"]))
+    if user.email != login_data["email"]:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid login code payload.")
+
+    role = user.role.value if hasattr(user.role, "value") else user.role
     access_token = create_access_token(
-        data={"id": user_data.id, "email": user_data.email, "role": role},
+        data={
+            "id": user.id,
+            "email": user.email,
+            "role": role,
+        },
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
-
-    redis = get_redis()
-    if redis is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Auth service temporarily unavailable. Please try again.",
-        )
-
-    # Store JWT under a short-lived single-use code so it never appears in the redirect URL.
-    code = secrets.token_urlsafe(32)
-    await redis.set(f"oauth:code:{code}", access_token, ex=_OAUTH_CODE_TTL)
-
-    frontend_url = request.session.pop("login_redirect", settings.frontend_url) or settings.frontend_url or "/"
-    return RedirectResponse(url=f"{frontend_url.rstrip('/')}/login?code={code}")
-
-
-@router.post("/exchange-token")
-async def exchange_oauth_token(code: str = Body(..., embed=True)):
-    """Exchange a short-lived OAuth code for a JWT. Codes are single-use and expire in 60 s."""
-    redis = get_redis()
-    if redis is None:
-        raise HTTPException(status_code=503, detail="Auth service temporarily unavailable.")
-
-    # GETDEL atomically reads and deletes — prevents replay attacks.
-    access_token = await redis.getdel(f"oauth:code:{code}")
-    if access_token is None:
-        raise HTTPException(status_code=401, detail="Invalid or expired code.")
 
     return {"access_token": access_token, "token_type": "bearer"}

@@ -38,6 +38,9 @@ def _pending_key(chat_id: int) -> str:
 def _stream_key(chat_id: int, temp_id: str) -> str:
     return f"chat:stream:{chat_id}:{temp_id}"
 
+def _stream_started_at_key(chat_id: int, temp_id: str) -> str:
+    return f"chat:stream:{chat_id}:{temp_id}:started_at"
+
 
 def _message_to_json(message: QueuedChatMessage) -> str:
     return json.dumps(asdict(message))
@@ -61,7 +64,8 @@ class InMemoryChatCache:
     def __init__(self) -> None:
         self._flush_queue: list[str] = []
         self._pending: dict[int, list[str]] = {}
-        self._streams: dict[str, str] = {}  # ordered dict; oldest key evicted at _MAX_IN_MEMORY_STREAMS
+        self._streams: dict[str, str] = {}
+        self._stream_started_at: dict[str, str] = {}
 
     async def enqueue(self, message: QueuedChatMessage) -> None:
         payload = _message_to_json(message)
@@ -89,6 +93,7 @@ class InMemoryChatCache:
         key = _stream_key(chat_id, temp_id)
         if key not in self._streams and len(self._streams) >= _MAX_IN_MEMORY_STREAMS:
             # Evict the oldest stream (insertion-ordered dict).
+            self._stream_started_at[key] = datetime.now(timezone.utc).isoformat()
             self._streams.pop(next(iter(self._streams)), None)
         self._streams[key] = self._streams.get(key, "") + chunk
 
@@ -105,12 +110,15 @@ class InMemoryChatCache:
                     "user_type": "assistant",
                     "statement": statement,
                     "streaming": True,
+                    "created_at": self._stream_started_at.get(key),
                 }
             )
         return results
 
     async def clear_stream(self, chat_id: int, temp_id: str) -> None:
-        self._streams.pop(_stream_key(chat_id, temp_id), None)
+        key = _stream_key(chat_id, temp_id)
+        self._streams.pop(key, None)
+        self._stream_started_at.pop(key, None)
 
 
 _memory_cache = InMemoryChatCache()
@@ -172,6 +180,7 @@ async def get_pending_messages(chat_id: int) -> list[QueuedChatMessage]:
         return await _memory_cache.get_pending(chat_id)
 
     payloads = await redis_client.lrange(_pending_key(chat_id), 0, -1)
+    
     return [_message_from_json(item) for item in payloads]
 
 
@@ -182,10 +191,15 @@ async def append_stream_chunk(chat_id: int, temp_id: str, chunk: str) -> None:
         return
 
     key = _stream_key(chat_id, temp_id)
+    started_at_key = _stream_started_at_key(chat_id, temp_id)
     sset = _streamset_key(chat_id)
     pipe = redis_client.pipeline()
+    started_at = datetime.now(timezone.utc).isoformat()
+    # Record the first-seen timestamp once per stream for stable sorting.
+    pipe.setnx(started_at_key, started_at)
     pipe.append(key, chunk)
     pipe.expire(key, settings.chat_stream_ttl_seconds)
+    pipe.expire(started_at_key, settings.chat_stream_ttl_seconds)
     # Track this stream key in a SET so get_active_streams avoids SCAN.
     pipe.sadd(sset, key)
     pipe.expire(sset, settings.chat_stream_ttl_seconds)
@@ -211,8 +225,11 @@ async def get_active_streams(chat_id: int) -> list[dict]:
             dead_keys.append(key)
             continue
         temp_id = key.removeprefix(prefix)
-        results.append({"temp_id": temp_id, "user_type": "assistant", "statement": statement, "streaming": True})
+        started_at_key = _stream_started_at_key(chat_id, temp_id)
+        created_at = await redis_client.get(started_at_key)
+        results.append({"temp_id": temp_id, "user_type": "assistant", "statement": statement, "streaming": True, "created_at": created_at})
 
+                
     if dead_keys:
         await redis_client.srem(sset, *dead_keys)
 
@@ -224,8 +241,4 @@ async def clear_stream(chat_id: int, temp_id: str) -> None:
     if redis_client is None:
         await _memory_cache.clear_stream(chat_id, temp_id)
         return
-    key = _stream_key(chat_id, temp_id)
-    pipe = redis_client.pipeline()
-    pipe.delete(key)
-    pipe.srem(_streamset_key(chat_id), key)
-    await pipe.execute()
+    await redis_client.delete(_stream_key(chat_id, temp_id), _stream_started_at_key(chat_id, temp_id))

@@ -6,19 +6,21 @@ import {
   deleteFile,
   FileRecord,
   getFiles,
-  toFileUrl,
+  fileDownloadUrl,
   uploadFile,
 } from "../../services/files_api";
 import FilePreview from "./FilePreview";
-import "./FileUpload.css";
 
 type FileUploadProps = {
   variant?: "embedded" | "modal";
   onClose?: () => void;
-  onUploadSuccess?: () => Promise<void> | void;
+  onUploadSuccess?: (file: FileRecord) => Promise<void> | void;
   showFileList?: boolean;
   subtitle?: string;
 };
+
+const fieldClass =
+  "rounded-lg border border-slate-400/30 bg-[#0b1325] px-2.5 py-2 text-[0.95rem] text-slate-200 outline-none focus:border-blue-500/50";
 
 function FileUpload({
   variant = "embedded",
@@ -80,8 +82,10 @@ function FileUpload({
 
     let uploaded = false;
 
+    let uploadedFile: FileRecord | null = null;
+
     try {
-      await uploadFile(selectedFile, description);
+      uploadedFile = await uploadFile(selectedFile, description);
       uploaded = true;
       setMessage("File uploaded successfully.");
       setSelectedFile(null);
@@ -93,14 +97,14 @@ function FileUpload({
       setUploading(false);
     }
 
-    if (!uploaded) return;
+    if (!uploaded || !uploadedFile) return;
 
     if (showFileList) {
       void loadFiles();
     }
 
     try {
-      await onUploadSuccess?.();
+      await onUploadSuccess?.(uploadedFile);
       if (variant === "modal") {
         onClose?.();
       }
@@ -117,24 +121,27 @@ function FileUpload({
   };
 
   const card = (
-    <div className="upload-card">
-      <h2 className="upload-card-title">Upload your file</h2>
+    <div className="box-border flex w-full flex-col gap-3.5 rounded-2xl border border-slate-400/25 bg-slate-900/70 p-7">
+      <h2 className="m-0 text-[1.4rem] font-bold text-slate-50">Upload your file</h2>
 
-      <p className="upload-card-subtitle">{subtitle}</p>
+      <p className="m-0 text-[0.95rem] leading-relaxed text-slate-300">{subtitle}</p>
 
-      <div {...getRootProps()} className="dropzone">
+      <div
+        {...getRootProps()}
+        className="cursor-pointer rounded-xl border-2 border-dashed border-slate-500 p-10 text-center text-slate-200 transition-colors hover:border-slate-400"
+      >
         <input {...getInputProps()} />
 
         {isDragActive ? (
-          <p>Drop the file here...</p>
+          <p className="m-0">Drop the file here...</p>
         ) : (
-          <p>Drag & drop file here, or click to select</p>
+          <p className="m-0">Drag & drop file here, or click to select</p>
         )}
       </div>
 
       {selectedFile && (
-        <p className="selected-file">
-          Selected: <strong>{selectedFile.name}</strong>
+        <p className="m-0 break-words text-sm text-slate-200">
+          Selected: <strong className="text-white">{selectedFile.name}</strong>
         </p>
       )}
 
@@ -148,7 +155,7 @@ function FileUpload({
 
       <input
         type="text"
-        className="upload-description-input"
+        className={fieldClass}
         placeholder="Description (optional)"
         value={description}
         onChange={(event) => setDescription(event.target.value)}
@@ -157,34 +164,41 @@ function FileUpload({
 
       <button
         type="button"
-        className="upload-submit-btn"
+        className="w-fit cursor-pointer rounded-lg border border-slate-400/30 bg-[#0b1325] px-2.5 py-2 text-[0.95rem] text-slate-200 disabled:cursor-not-allowed disabled:opacity-70"
         onClick={() => void handleUpload()}
         disabled={!selectedFile || uploading}
       >
         {uploading ? "Uploading..." : "Upload"}
       </button>
 
-      {message && <p className="upload-message">{message}</p>}
+      {message && <p className="m-0 text-sm text-blue-300">{message}</p>}
 
       {showFileList && (
-        <div className="file-list">
-          <h3>Files</h3>
+        <div className="mt-1.5 flex flex-col gap-2">
+          <h3 className="m-0 text-slate-50">Files</h3>
           {files.length === 0 ? (
-            <p>No files uploaded.</p>
+            <p className="m-0 text-slate-300">No files uploaded.</p>
           ) : (
             files.map((file) => (
-              <div key={file.id} className="file-row">
+              <div
+                key={file.id}
+                className="grid grid-cols-1 items-center gap-1.5 border-b border-slate-400/15 pb-2 sm:grid-cols-[1fr_auto_auto] sm:gap-2 sm:border-b-0 sm:pb-0"
+              >
                 <a
-                  href={toFileUrl(file.id)}
+                  href={fileDownloadUrl(file.id)}
                   target="_blank"
                   rel="noreferrer"
+                  className="truncate text-blue-300 no-underline hover:underline"
                 >
                   {file.filename}
                 </a>
-                <span>{Math.round(file.filesize / 1024)} KB</span>
+                <span className="text-sm text-slate-300">
+                  {Math.round(file.filesize / 1024)} KB
+                </span>
 
                 <button
                   type="button"
+                  className="cursor-pointer rounded-lg border border-slate-400/30 bg-[#0b1325] px-2 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
                   onClick={() => void handleDelete(file.id)}
                 >
                   Delete
@@ -199,9 +213,12 @@ function FileUpload({
 
   if (variant === "modal") {
     return (
-      <div className="upload-modal-overlay" onClick={onClose}>
+      <div
+        className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/72 p-6 backdrop-blur-sm"
+        onClick={onClose}
+      >
         <div
-          className="upload-modal-panel"
+          className="w-full max-w-[480px]"
           onClick={(e) => e.stopPropagation()}
         >
           {card}

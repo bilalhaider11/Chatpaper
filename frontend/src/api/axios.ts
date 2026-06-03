@@ -1,7 +1,19 @@
 import axios from "axios";
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
+/** Ensures browser requests hit FastAPI's `/api` router (see backend/api/router.py). */
+export function normalizeApiBaseUrl(url: string): string {
+  const trimmed = url.replace(/\/+$/, "");
+  return trimmed.endsWith("/api") ? trimmed : `${trimmed}/api`;
+}
+
+export const API_BASE_URL = normalizeApiBaseUrl(
+  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api"
+);
+
+/** Origin without the `/api` suffix (e.g. for WebSocket host). */
+export function apiOrigin(): string {
+  return API_BASE_URL.replace(/\/api$/, "");
+}
 const TOKEN_KEY = "auth_token";
 
 export type User = {
@@ -58,11 +70,7 @@ export async function signup(email:string, password:string){
   "email": email,
   "password": password
 }
-  const response = await api.post(
-    "auth/users",
-    payload
-
-  )
+  const response = await api.post("/auth/users", payload);
   return response.data
 }
 
@@ -71,6 +79,21 @@ export async function fetchCurrentUser() {
   return response.data;
 }
 
-export function toFileUrl(fileId: number) {
-  return `${API_BASE_URL}/files/${fileId}/download`;
+/** Build an absolute URL for an API path (e.g. `/files/1/download`). */
+export function toApiUrl(path: string): string {
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  const withApiPrefix = normalized.startsWith("/api/")
+    ? normalized
+    : `/api${normalized}`;
+  return `${apiOrigin()}${withApiPrefix}`;
+}
+
+/** Authenticated file download route. */
+export function fileDownloadUrl(fileId: number): string {
+  return toApiUrl(`/files/${fileId}/download`);
+}
+
+/** @deprecated Prefer {@link fileDownloadUrl} for downloads. */
+export function toFileUrl(path: string) {
+  return toApiUrl(path);
 }

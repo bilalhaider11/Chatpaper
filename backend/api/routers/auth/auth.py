@@ -6,6 +6,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import auth as auth_functions
+from models.auth import User
 from services import auth as auth_service
 from schema import auth as schema_auth
 from core.config import settings
@@ -36,8 +37,9 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    role = member.role.value if hasattr(member.role, "value") else member.role
     access_token = auth_functions.create_access_token(
-        data={"id": member.id, "email": member.email, "role": member.role},
+        data={"id": member.id, "email": member.email, "role": role},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
 
@@ -66,9 +68,9 @@ async def read_all_users(skip: int = 0, limit: int = 100, db: AsyncSession = Dep
 
 @router.get("/users/me", response_model=schema_auth.User)
 async def read_me(
-    current_user: Annotated[schema_auth.User, Depends(auth_functions.get_current_user)],
+    current_user: Annotated[User, Depends(auth_functions.get_current_user)],
 ):
-    return current_user
+    return schema_auth.User.model_validate(current_user)
 
 
 @router.get(

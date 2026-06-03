@@ -1,18 +1,25 @@
-import { api, API_BASE_URL } from "../api/axios";
+import { api, apiOrigin, tokenStore } from "../api/axios";
 
 export type Conversation = {
-  id: number;
-  chat_id?: number;
+  id: number | null;
+  chat_id?: number | null;
+  temp_id?: string | null;
+  created_at?: string | null;
   user_type: string;
   statement: string;
+  streaming?: boolean;
 };
 
 export type ConversationListItem = {
   id: number;
+  file_id: number;
   conversation_title: string;
   is_active: boolean;
-  conversation_type: string;
-  file_id: number | null;
+};
+
+export type ConversationPayload = {
+  statement: string;
+  user_type: "user" | "system";
 };
 
 export type ChatWsEvent =
@@ -23,6 +30,7 @@ export type ChatWsEvent =
       statement: string;
       chat_id: number;
       id?: number;
+      created_at?: string;
     }
   | {
       type: "chunk";
@@ -30,6 +38,7 @@ export type ChatWsEvent =
       user_type: "system";
       chunk: string;
       chat_id: number;
+      created_at?: string;
     }
   | {
       type: "done";
@@ -38,6 +47,7 @@ export type ChatWsEvent =
       statement: string;
       chat_id: number;
       id?: number;
+      created_at?: string;
     }
   | {
       type: "error";
@@ -50,11 +60,13 @@ export type LiveMessage = {
   user_type: "user" | "system";
   statement: string;
   streaming?: boolean;
+  created_at?: string;
 };
 
 export function getChatWebSocketUrl(chatListId: number) {
-  const wsBase = API_BASE_URL.replace(/^http/, "ws").replace(/\/api$/, "");
-  return `${wsBase}/api/conversation/ws/${chatListId}`;
+  const wsBase = apiOrigin().replace(/^http/, "ws");
+  const token = tokenStore.getToken();
+  return `${wsBase}/api/conversation/ws/${chatListId}?token=${encodeURIComponent(token ?? "")}`;
 }
 
 export function normalizeUserType(userType: string): "user" | "system" {
@@ -63,6 +75,11 @@ export function normalizeUserType(userType: string): "user" | "system" {
   return "user";
 }
 
+export type ConversationPageResponse = {
+  messages: Conversation[];
+  next_cursor_id: number | null;
+};
+
 export async function getConversationList() {
   const response = await api.get<ConversationListItem[]>(
     "/conversation/get_conversation_list"
@@ -70,16 +87,49 @@ export async function getConversationList() {
   return response.data;
 }
 
-export async function getConversation(conversationListId: number) {
-  const response = await api.get<Conversation[]>(
-    `/conversation/get-conversation/${conversationListId}`
+export async function getConversation(
+  conversationListId: number,
+  cursorId?: number | null,
+  limit: number = 25
+) {
+  const response = await api.get<ConversationPageResponse>(
+    `/conversation/get-conversation/${conversationListId}`,
+    {
+      params: {
+        cursor_id: cursorId ?? undefined,
+        limit,
+      },
+    }
   );
   return response.data;
 }
 
-export async function createConversationList() {
+export async function postConversationChat(
+  conversationListId: number,
+  chat: ConversationPayload
+) {
+  const response = await api.post<Conversation>(
+    `/conversation/conversation/${conversationListId}`,
+    chat
+  );
+  return response.data;
+}
+
+export async function createConversationList(fileId: number) {
   const response = await api.post<ConversationListItem>(
-    "/conversation/inconversationlist"
+    "/conversation/inconversationlist",
+    { file_id: fileId }
+  );
+  return response.data;
+}
+
+export async function updateConversationTitle(
+  conversationId: number,
+  conversationTitle: string
+) {
+  const response = await api.patch(
+    `/conversation/conversation-title/${conversationId}`,
+    { conversation_title: conversationTitle }
   );
   return response.data;
 }
@@ -94,7 +144,7 @@ export async function deleteConversationList(conversationListid: number) {
 export async function editConversationListTitle(list_id: number, title: string) {
   const response = await api.patch(
     `/conversation/conversation-title/${list_id}`,
-    { title }
+    { conversation_title: title }
   );
   return response.data;
 }

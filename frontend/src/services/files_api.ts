@@ -1,14 +1,17 @@
-import { api, toFileUrl } from "../api/axios";
+import { api, fileDownloadUrl, toFileUrl } from "../api/axios";
 
-export { toFileUrl };
+export { fileDownloadUrl, toFileUrl };
 
 export type FileRecord = {
   id: number;
   filename: string;
-  filepath: string;
+  filepath?: string;
   filesize: number;
-  description: string | null;
-  is_active: boolean;
+  description?: string | null;
+  is_active?: boolean;
+  ingestion_status?: string | null;
+  conversation_id?: number;
+  reactivated?: boolean;
 };
 
 export async function uploadFile(

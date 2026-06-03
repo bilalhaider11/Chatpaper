@@ -27,7 +27,7 @@ if [ ! -f "$BACKEND_DIR/.env" ]; then
     cat > "$BACKEND_DIR/.env" <<EOF
 SECRET_KEY=$SECRET_KEY
 ALGORITHM=HS256
-DATABASE=postgresql://postgres:postgres@127.0.0.1:5433/chatpaper
+DATABASE=postgresql://postgres:postgres@localhost:5432/chatbot
 ACCESS_TOKEN_EXPIRE_MINUTES=600
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=$ADMIN_PASSWORD

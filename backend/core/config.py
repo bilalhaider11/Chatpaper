@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import os
 from typing import Optional
 
@@ -15,7 +16,8 @@ class Settings(BaseModel):
     algorithm: str = os.getenv("ALGORITHM", "HS256")
     database: str = os.getenv("DATABASE", "")
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
-    
+    google_login_code_expire_seconds: int = int(os.getenv("GOOGLE_LOGIN_CODE_EXPIRE_SECONDS", "60"))
+
     chat_data_ttl_seconds:int = int(os.getenv("CHAT_DATA_TTL_SECONDS",'3600'))
 
     # Set true in multi-worker production: startup aborts if Redis is unreachable.
@@ -172,4 +174,10 @@ class Settings(BaseModel):
         return self
 
 
-settings = Settings()
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()

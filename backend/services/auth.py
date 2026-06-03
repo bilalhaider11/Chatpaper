@@ -1,12 +1,73 @@
+import json
+from datetime import datetime, timezone
+import secrets
+
 from fastapi import HTTPException
 from passlib.context import CryptContext
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.redis_client import get_redis
 from models.auth import User
 from schema import auth as schema_auth
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+class RedisUnavailableError(Exception):
+    pass
+
+
+class LoginCodeInvalidError(Exception):
+    pass
+
+
+LOGIN_CODE_PREFIX = "login_code:"
+
+def _login_code_key(code: str) -> str:
+    return f"{LOGIN_CODE_PREFIX}{code}"
+
+
+async def create_google_login_code(code: str, user: User, ttl_seconds: int) -> None:
+    redis_client = get_redis()
+    if redis_client is None:
+        raise RedisUnavailableError("Redis is unavailable")
+
+    payload = json.dumps({"user_id": user.id, "email": user.email})
+    try:
+        success = await redis_client.set(_login_code_key(code), payload, ex=ttl_seconds)
+    except RedisError as exc:
+        raise RedisUnavailableError("Redis error while storing login code") from exc
+
+    if not success:
+        raise RedisUnavailableError("Failed to create login code")
+
+
+async def consume_google_login_code(code: str) -> dict[str, str | int]:
+    redis_client = get_redis()
+    if redis_client is None:
+        raise RedisUnavailableError("Redis is unavailable")
+
+    try:
+        payload = await redis_client.getdel(_login_code_key(code))
+    except RedisError as exc:
+        raise RedisUnavailableError("Redis error while consuming login code") from exc
+
+    if not payload:
+        raise LoginCodeInvalidError("Invalid or expired login code")
+
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise LoginCodeInvalidError("Invalid login code payload") from exc
+
+    user_id = data.get("user_id")
+    email = data.get("email")
+    if not user_id or not email:
+        raise LoginCodeInvalidError("Invalid login code payload")
+
+    return {"user_id": user_id, "email": email}
 
 
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:

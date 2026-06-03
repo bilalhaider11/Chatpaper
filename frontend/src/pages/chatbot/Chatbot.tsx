@@ -1,4 +1,3 @@
-import "./Chatbot.css";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
@@ -6,7 +5,7 @@ import SystemMessageModal from "../../components/chatbot/SystemMessageModal";
 import FileUpload from "../../components/fileUpload/FileUpload";
 import { DeleteIcon, EditIcon } from "../../components/icons/ActionIcons";
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
-import { getFiles } from "../../services/files_api";
+import { FileRecord } from "../../services/files_api";
 import {
   ChatWsEvent,
   Conversation,
@@ -20,6 +19,9 @@ import {
   editConversationListTitle,
 } from "../../services/conversation_api";
 
+const sidebarBtnClass =
+  "w-full cursor-pointer rounded-[10px] border border-white/10 bg-transparent px-3 py-2.5 text-[0.95rem] text-[#ececec] transition-colors hover:bg-blue-900/10 disabled:cursor-not-allowed disabled:opacity-60";
+
 function Chatbot() {
   const [editingId, setEditingId] = useState(0);
   const [editTitle, setEditTitle] = useState("");
@@ -27,15 +29,18 @@ function Chatbot() {
   const [systemModalOpen, setSystemModalOpen] = useState(false);
   const navigate = useNavigate();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLElement | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [input, setInput] = useState("");
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(
     null
   );
-  const [hasUploadedFile, setHasUploadedFile] = useState(false);
   const [messages, setMessages] = useState<Conversation[]>([]);
   const [liveMessages, setLiveMessages] = useState<LiveMessage[]>([]);
+  const [nextCursorId, setNextCursorId] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [isNearBottom, setIsNearBottom] = useState(true);
   const [loading, setLoading] = useState(true);
   const [creatingChat, setCreatingChat] = useState(false);
   const [sending, setSending] = useState(false);
@@ -48,9 +53,11 @@ function Chatbot() {
   };
 
   const loadMessages = async (conversationListId: number) => {
-    const data = await getConversation(conversationListId);
-    setMessages(data);
+    const page = await getConversation(conversationListId, null, 25);
+    setMessages(page.messages);
+    setNextCursorId(page.next_cursor_id);
     setLiveMessages([]);
+    setIsNearBottom(true);
   };
 
   const handleWsEvent = useCallback((event: ChatWsEvent) => {
@@ -58,13 +65,26 @@ function Chatbot() {
 
     if (event.type === "message") {
       setLiveMessages((prev) => {
-        if (prev.some((item) => item.tempId === event.temp_id)) return prev;
+        const index = prev.findIndex((item) => item.tempId === event.temp_id);
+        if (index >= 0) {
+          const next = [...prev];
+          next[index] = {
+            ...next[index],
+            user_type: normalizeUserType(event.user_type),
+            statement: event.statement,
+            streaming: false,
+            id: event.id,
+            created_at: event.created_at ?? next[index].created_at,
+          };
+          return next;
+        }
         return [
           ...prev,
           {
             tempId: event.temp_id,
             user_type: normalizeUserType(event.user_type),
             statement: event.statement,
+            created_at: event.created_at,
           },
         ];
       });
@@ -80,6 +100,7 @@ function Chatbot() {
             ...next[index],
             statement: next[index].statement + event.chunk,
             streaming: true,
+            created_at: event.created_at ?? next[index].created_at,
           };
           return next;
         }
@@ -90,6 +111,7 @@ function Chatbot() {
             user_type: "system",
             statement: event.chunk,
             streaming: true,
+            created_at: event.created_at,
           },
         ];
       });
@@ -106,6 +128,7 @@ function Chatbot() {
             statement: event.statement,
             streaming: false,
             id: event.id,
+            created_at: event.created_at ?? next[index].created_at,
           };
           return next;
         }
@@ -115,6 +138,7 @@ function Chatbot() {
             tempId: event.temp_id,
             user_type: "system",
             statement: event.statement,
+            created_at: event.created_at,
           },
         ];
       });
@@ -128,21 +152,48 @@ function Chatbot() {
   });
 
   const displayedMessages = useMemo(() => {
-    const persisted = messages.map((message) => ({
-      key: `db-${message.id}`,
-      user_type: normalizeUserType(message.user_type),
-      statement: message.statement,
-      streaming: false,
-    }));
+    const byKey = new Map<
+      string,
+      {
+        key: string;
+        user_type: "user" | "system";
+        statement: string;
+        streaming: boolean;
+        created_at?: string | null;
+      }
+    >();
 
-    const live = liveMessages.map((message) => ({
-      key: message.tempId,
-      user_type: message.user_type,
-      statement: message.statement,
-      streaming: Boolean(message.streaming),
-    }));
+    for (const message of messages) {
+      const key =
+        message.id != null
+          ? `id:${message.id}`
+          : `temp:${message.temp_id ?? "unknown"}`;
+      byKey.set(key, {
+        key,
+        user_type: normalizeUserType(message.user_type),
+        statement: message.statement,
+        streaming: Boolean(message.streaming),
+        created_at: message.created_at,
+      });
+    }
 
-    return [...persisted, ...live];
+    for (const live of liveMessages) {
+      const key = `temp:${live.tempId}`;
+      const existing = byKey.get(key);
+      byKey.set(key, {
+        key,
+        user_type: live.user_type,
+        statement: live.statement,
+        streaming: Boolean(live.streaming),
+        created_at: live.created_at ?? existing?.created_at ?? null,
+      });
+    }
+
+    return Array.from(byKey.values()).sort((a, b) => {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return ta - tb;
+    });
   }, [messages, liveMessages]);
 
   useEffect(() => {
@@ -157,13 +208,10 @@ function Chatbot() {
         setUser(currentUser);
         const list = await loadConversationList();
         if (list.length > 0) {
-          setHasUploadedFile(true);
           setisopen(false);
           setSelectedConversationId(list[0].id);
           await loadMessages(list[0].id);
         } else {
-          const files = await getFiles();
-          setHasUploadedFile(files.length > 0);
           setisopen(true);
         }
       } catch {
@@ -178,30 +226,67 @@ function Chatbot() {
   }, [navigate]);
 
   useEffect(() => {
+    if (!isNearBottom || loadingMore) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [displayedMessages]);
+  }, [displayedMessages, isNearBottom, loadingMore]);
 
   const handleSelectConversation = async (conversationListId: number) => {
     setSelectedConversationId(conversationListId);
     await loadMessages(conversationListId);
   };
 
-  const handleStartChat = async () => {
-    if (!hasUploadedFile) {
-      setisopen(true);
-      return;
-    }
+  const loadOlderMessages = useCallback(async () => {
+    if (!selectedConversationId) return;
+    if (!nextCursorId) return;
+    if (loadingMore) return;
 
-    setCreatingChat(true);
+    const el = messagesScrollRef.current;
+    if (!el) return;
+
+    const prevScrollHeight = el.scrollHeight;
+    const prevScrollTop = el.scrollTop;
+
+    setLoadingMore(true);
     try {
-      const newConversation = await createConversationList();
-      setConversations((prev) => [newConversation, ...prev]);
-      setSelectedConversationId(newConversation.id);
-      setMessages([]);
-      setLiveMessages([]);
+      const page = await getConversation(selectedConversationId, nextCursorId, 25);
+      if (page.messages.length > 0) {
+        const keyFor = (m: Conversation) =>
+          m.id != null ? `id:${m.id}` : `temp:${m.temp_id ?? m.created_at ?? "unknown"}`;
+
+        setMessages((prev) => {
+          const next = [...page.messages, ...prev];
+          const map = new Map<string, Conversation>();
+          for (const msg of next) map.set(keyFor(msg), msg);
+          return Array.from(map.values());
+        });
+      }
+      setNextCursorId(page.next_cursor_id);
     } finally {
-      setCreatingChat(false);
+      setLoadingMore(false);
+      setIsNearBottom(false);
+      requestAnimationFrame(() => {
+        const updatedEl = messagesScrollRef.current;
+        if (!updatedEl) return;
+        const newScrollHeight = updatedEl.scrollHeight;
+        updatedEl.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+      });
     }
+  }, [selectedConversationId, nextCursorId, loadingMore]);
+
+  const handleMessagesScroll = useCallback(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setIsNearBottom(distanceFromBottom < 200);
+
+    if (el.scrollTop < 50 && nextCursorId && !loadingMore) {
+      void loadOlderMessages();
+    }
+  }, [loadOlderMessages, nextCursorId, loadingMore]);
+
+  const handleStartChat = () => {
+    setisopen(true);
   };
 
   const sendChatMessage = async (
@@ -214,19 +299,8 @@ function Chatbot() {
     let conversationListId = selectedConversationId;
 
     if (!conversationListId) {
-      if (!hasUploadedFile) {
-        setisopen(true);
-        return;
-      }
-      setCreatingChat(true);
-      try {
-        const newConversation = await createConversationList();
-        setConversations((prev) => [newConversation, ...prev]);
-        conversationListId = newConversation.id;
-        setSelectedConversationId(newConversation.id);
-      } finally {
-        setCreatingChat(false);
-      }
+      setisopen(true);
+      return;
     }
 
     setBusy(true);
@@ -271,9 +345,8 @@ function Chatbot() {
       } else {
         setMessages([]);
         setLiveMessages([]);
-        const files = await getFiles();
-        setHasUploadedFile(files.length > 0);
-        setisopen(files.length === 0);
+        setNextCursorId(null);
+        setisopen(true);
       }
     }
   };
@@ -283,20 +356,32 @@ function Chatbot() {
     setEditTitle(conversation.conversation_title || "New chat");
   };
 
-  const handleUploadSuccess = async () => {
+  const handleUploadSuccess = async (file: FileRecord) => {
+    setCreatingChat(true);
     try {
-      setHasUploadedFile(true);
       const list = await loadConversationList();
-      if (list.length > 0) {
-        setSelectedConversationId(list[0].id);
-        setMessages([]);
-        setLiveMessages([]);
-        await loadMessages(list[0].id);
-        setisopen(false);
+      const existing =
+        file.conversation_id != null
+          ? list.find((item) => item.id === file.conversation_id)
+          : list.find((item) => item.file_id === file.id);
+
+      const conversation =
+        existing ?? (await createConversationList(file.id));
+
+      if (!existing) {
+        setConversations((prev) => [conversation, ...prev]);
+      } else {
+        setConversations(list);
       }
+
+      setSelectedConversationId(conversation.id);
+      await loadMessages(conversation.id);
+      setisopen(false);
     } catch (error) {
       console.error("Failed to start chat after upload:", error);
       throw error;
+    } finally {
+      setCreatingChat(false);
     }
   };
 
@@ -320,7 +405,11 @@ function Chatbot() {
   };
 
   if (loading) {
-    return <div className="chatbot-loading">Loading...</div>;
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#162438] text-[#ececec]">
+        Loading...
+      </div>
+    );
   }
 
   const activeConversation = conversations.find(
@@ -328,12 +417,12 @@ function Chatbot() {
   );
 
   return (
-    <div className="chatbot-page">
-      <aside className="chatbot-sidebar">
-        <div className="sidebar-top">
+    <div className="grid min-h-screen bg-[#1a1b27] text-[#ececec] md:grid-cols-[260px_1fr]">
+      <aside className="hidden min-h-screen flex-col border-r border-white/10 bg-[#1b2338] p-3 md:flex">
+        <div className="mb-3">
           <button
             type="button"
-            className="new-chat-btn"
+            className={sidebarBtnClass}
             onClick={() => void handleStartChat()}
             disabled={creatingChat}
           >
@@ -341,98 +430,123 @@ function Chatbot() {
           </button>
         </div>
 
-        <div className="sidebar-section-label">Conversations</div>
+        <div className="px-2.5 pb-1.5 pt-2 text-xs uppercase tracking-wider text-[#8e8ea0]">
+          Conversations
+        </div>
 
-        <nav className="conversation-list">
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto pr-0.5">
           {conversations.length === 0 ? (
-            <p className="sidebar-empty">No conversations yet. Start a new chat.</p>
+            <p className="m-0 px-2.5 py-2.5 text-sm text-[#8e8ea0]">
+              No conversations yet. Upload a file to start a new chat.
+            </p>
           ) : (
-            conversations.map((conversation) => (
-              <button
-                key={conversation.id}
-                type="button"
-                className={`conversation-item${conversation.id === selectedConversationId ? " active" : ""}`}
-                onClick={() => void handleSelectConversation(conversation.id)}
-              >
-                {editingId === conversation.id ? (
-                  <form
-                    onSubmit={(e) => handleSaveEdit(e, conversation.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="edit-form"
-                  >
-                    <input
-                      type="text"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      autoFocus
-                      className="edit-input"
-                    />
-                    <button type="submit">Save</button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingId(0);
-                      }}
+            conversations.map((conversation) => {
+              const isActive = conversation.id === selectedConversationId;
+              return (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  className={`flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] border-0 px-3 py-2.5 text-left transition-colors ${isActive
+                    ? "bg-blue-300/10"
+                    : "bg-transparent hover:bg-sky-200/10"
+                    }`}
+                  onClick={() => void handleSelectConversation(conversation.id)}
+                >
+                  {editingId === conversation.id ? (
+                    <form
+                      onSubmit={(e) => handleSaveEdit(e, conversation.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex w-full items-center gap-1.5"
                     >
-                      Cancel
-                    </button>
-                  </form>
-                ) : (
-                  <>
-                    <span className="conversation-title">
-                      {conversation.conversation_title || "New chat"}
-                    </span>
-                    <div className="conversation-actions">
+                      <input
+                        type="text"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        autoFocus
+                        className="min-w-0 flex-1 rounded-md border border-white/15 bg-[#2f2f2f] px-2 py-1 text-sm text-[#ececec] outline-none"
+                      />
                       <button
-                        type="button"
-                        className="conversation-icon-btn edit"
-                        aria-label="Edit conversation title"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleStartEdit(conversation);
-                        }}
+                        type="submit"
+                        className="cursor-pointer rounded-md border border-white/10 bg-transparent px-2 py-1 text-xs text-[#ececec]"
                       >
-                        <EditIcon />
+                        Save
                       </button>
                       <button
                         type="button"
-                        className="conversation-icon-btn delete"
-                        aria-label="Delete conversation"
+                        className="cursor-pointer rounded-md border border-white/10 bg-transparent px-2 py-1 text-xs text-[#ececec]"
                         onClick={(e) => {
                           e.stopPropagation();
-                          void handleDelete(conversation.id);
+                          setEditingId(0);
                         }}
                       >
-                        <DeleteIcon />
+                        Cancel
                       </button>
-                    </div>
-                  </>
-                )}
-              </button>
-            ))
+                    </form>
+                  ) : (
+                    <>
+                      <span className="min-w-0 flex-1 truncate text-sm">
+                        {conversation.conversation_title || "New chat"}
+                      </span>
+                      <div className="ml-auto flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-[#6994e6] hover:bg-white/10 hover:text-[#93b4f5]"
+                          aria-label="Edit conversation title"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStartEdit(conversation);
+                          }}
+                        >
+                          <EditIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-[#e57373] hover:bg-white/10 hover:text-[#ef9a9a]"
+                          aria-label="Delete conversation"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDelete(conversation.id);
+                          }}
+                        >
+                          <DeleteIcon />
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </button>
+              );
+            })
           )}
         </nav>
 
-        <div className="sidebar-footer">
-          <Link to="/" className="sidebar-link">
+        <div className="mt-3 flex flex-col gap-2 border-t border-sky-700/10 pt-3">
+          <Link
+            to="/"
+            className="rounded-lg px-2.5 py-2 text-left text-sm text-[#c5c5d2] no-underline hover:bg-white/10"
+          >
             Home
           </Link>
-          <button type="button" className="sidebar-logout" onClick={logout}>
+          <button
+            type="button"
+            className="cursor-pointer rounded-lg border-0 bg-transparent px-2.5 py-2 text-left text-sm text-[#c5c5d2] hover:bg-white/10"
+            onClick={logout}
+          >
             Logout
           </button>
         </div>
       </aside>
 
-      <main className="chatbot-main">
-        <header className="chatbot-header">
+      <main className="grid min-h-screen grid-rows-[auto_1fr_auto]">
+        <header className="flex items-center justify-between gap-4 border-b border-white/10 px-6 py-4">
           <div>
-            <h1>{activeConversation?.conversation_title ?? "Assistant"}</h1>
-            <span>{user?.email}</span>
+            <h1 className="m-0 text-[1.05rem] font-semibold">
+              {activeConversation?.conversation_title ?? "Assistant"}
+            </h1>
+            <span className="text-sm text-[#8e8ea0]">{user?.email}</span>
           </div>
           <button
             type="button"
-            className="system-msg-btn"
+            className="cursor-pointer whitespace-nowrap rounded-[10px] border border-[#6994e6]/45 bg-[#052b72]/35 px-3.5 py-2 text-sm text-[#c9dcff] hover:bg-[#052b72]/60 disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() => setSystemModalOpen(true)}
             disabled={!selectedConversationId || creatingChat}
           >
@@ -440,22 +554,30 @@ function Chatbot() {
           </button>
         </header>
 
-        <section className="chatbot-messages">
+        <section
+          ref={(node) => {
+            messagesScrollRef.current = node;
+          }}
+          onScroll={() => handleMessagesScroll()}
+          className="flex flex-col gap-4 overflow-y-auto p-6 min-h-0"
+        >
           {isopen ? (
             <FileUpload
               variant="modal"
               onClose={() => setisopen(false)}
               onUploadSuccess={handleUploadSuccess}
-              subtitle="Upload a document to use with this chat session."
+              subtitle="Upload a document to start this chat. Each conversation requires its own file."
             />
           ) : null}
           {!selectedConversationId && displayedMessages.length === 0 ? (
-            <div className="chatbot-empty-state">
-              <h2>How can I help you today?</h2>
-              <p>Start a new chat or select a conversation from the sidebar.</p>
+            <div className="m-auto max-w-[420px] text-center text-[#c5c5d2]">
+              <h2 className="mb-2 text-2xl text-[#ececec]">How can I help you today?</h2>
+              <p className="mb-5">
+                Upload a document to start a new chat, or select a conversation from the sidebar.
+              </p>
               <button
                 type="button"
-                className="start-chat-btn"
+                className={`${sidebarBtnClass} mx-auto min-w-[140px] w-auto`}
                 onClick={() => void handleStartChat()}
                 disabled={creatingChat}
               >
@@ -463,42 +585,77 @@ function Chatbot() {
               </button>
             </div>
           ) : displayedMessages.length === 0 ? (
-            <div className="chatbot-empty-state compact">
+            <div className="mx-auto mt-10 max-w-[420px] text-center text-[#c5c5d2]">
               <p>Send a message to begin this conversation.</p>
             </div>
           ) : (
-            displayedMessages.map((message) => (
-              <div
-                key={message.key}
-                className={`chat-msg ${message.user_type === "user" ? "user" : "system"}${message.streaming ? " streaming" : ""
-                  }`}
-              >
-                <div className="chat-msg-label">
-                  {message.user_type === "user" ? "You" : "System"}
+            <>
+              {nextCursorId ? (
+                <div className="sticky top-0 z-10 mb-4 flex items-center justify-center">
+                  <button
+                    type="button"
+                    onClick={() => void loadOlderMessages()}
+                    disabled={loadingMore}
+                    className="rounded-full border border-white/10 bg-[#1b2338]/90 px-3 py-1 text-xs text-[#c5c5d2] transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loadingMore ? "Loading older messages…" : "Scroll up to load older messages"}
+                  </button>
                 </div>
-                <div className="chat-msg-content">
-                  {message.statement}
-                  {message.streaming ? <span className="stream-cursor">▍</span> : null}
-                </div>
-              </div>
-            ))
+              ) : null}
+              {displayedMessages.map((message) => {
+                const isUser = message.user_type === "user";
+                return (
+                  <div
+                    key={message.key}
+                    className={`flex max-w-[72%] flex-col gap-1 sm:max-w-[90%] ${isUser ? "self-end" : "self-start"
+                      }`}
+                  >
+                    <div
+                      className={`px-1 text-xs text-[#8e8ea0] ${isUser ? "text-right" : "text-left"
+                        }`}
+                    >
+                      {isUser ? "You" : "System"}
+                    </div>
+                    <div
+                      className={`break-words rounded-[14px] px-3.5 py-3 leading-relaxed ${isUser
+                        ? "rounded-tr-sm bg-[#031055] text-white"
+                        : "rounded-tl-sm bg-[#2f2f2f]"
+                        } ${message.streaming ? "border border-[#6994e6]/35" : ""}`}
+                    >
+                      {message.statement}
+                      {message.streaming ? (
+                        <span className="ml-0.5 inline-block animate-blink">▍</span>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </>
           )}
-          <div ref={messagesEndRef} />
         </section>
 
-        <footer className="chatbot-input">
-          <form onSubmit={(event) => void handleSend(event)}>
-            <input
-              placeholder="Type your message..."
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              disabled={sending || creatingChat}
-            />
-            <button type="submit" disabled={!input.trim() || sending || creatingChat}>
-              Send
-            </button>
-          </form>
-        </footer>
+        <footer className="border-t border-white/10 bg-[#212121] px-6 pb-6 pt-4">
+          <form
+            onSubmit={(event) => void handleSend(event)}
+            className="mx-auto flex max-w-[900px] gap-2.5"
+          >
+              <input
+                placeholder="Type your message..."
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                disabled={sending || creatingChat}
+                className="flex-1 rounded-full border border-white/10 bg-[#2f2f2f] px-[18px] py-3.5 text-[#ececec] outline-none focus:border-sky-200/60"
+              />
+              <button
+                type="submit"
+                disabled={!input.trim() || sending || creatingChat}
+                className="cursor-pointer rounded-full border-0 bg-[#052b72] px-[22px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                Send
+              </button>
+            </form>
+          </footer>
       </main>
 
       <SystemMessageModal

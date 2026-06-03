@@ -17,6 +17,37 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _USER_CACHE_TTL = settings.access_token_expire_minutes * 60
 
 
+def _user_to_cache_payload(user: User) -> dict:
+    role = user.role.value if hasattr(user.role, "value") else user.role
+    return {
+        "id": user.id,
+        "email": user.email,
+        "role": role,
+        "is_active": user.is_active,
+        "auth_provider": user.auth_provider,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+    }
+
+
+def _user_from_cache_payload(data: dict) -> User | None:
+    required = ("id", "email", "role", "is_active", "auth_provider", "created_at", "updated_at")
+    if not all(key in data and data[key] is not None for key in required):
+        return None
+    try:
+        user = User()
+        user.id = data["id"]
+        user.email = data["email"]
+        user.role = UserRole(data["role"])
+        user.is_active = data["is_active"]
+        user.auth_provider = data["auth_provider"]
+        user.created_at = datetime.fromisoformat(data["created_at"])
+        user.updated_at = datetime.fromisoformat(data["updated_at"])
+        return user
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
 async def _get_cached_user(user_id: int) -> User | None:
     from core.redis_client import get_redis
     redis = get_redis()
@@ -25,14 +56,13 @@ async def _get_cached_user(user_id: int) -> User | None:
     raw = await redis.get(f"user:cache:{user_id}")
     if raw is None:
         return None
-    data = json.loads(raw)
-    user = User()
-    user.id = data["id"]
-    user.email = data["email"]
-    user.role = data["role"]
-    user.is_active = data["is_active"]
-    user.auth_provider = data["auth_provider"]
-    return user
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _user_from_cache_payload(data)
 
 
 async def _cache_user(user: User) -> None:
@@ -40,14 +70,13 @@ async def _cache_user(user: User) -> None:
     redis = get_redis()
     if redis is None:
         return
-    data = {
-        "id": user.id,
-        "email": user.email,
-        "role": user.role.value if hasattr(user.role, "value") else user.role,
-        "is_active": user.is_active,
-        "auth_provider": user.auth_provider,
-    }
-    await redis.set(f"user:cache:{user.id}", json.dumps(data), ex=_USER_CACHE_TTL)
+    if user.created_at is None or user.updated_at is None:
+        return
+    await redis.set(
+        f"user:cache:{user.id}",
+        json.dumps(_user_to_cache_payload(user)),
+        ex=_USER_CACHE_TTL,
+    )
 
 
 async def invalidate_user_cache(user_id: int) -> None:
@@ -107,7 +136,7 @@ async def get_current_user(
                 return cached
 
         user = await auth.get_user_by_email(db, current_email)
-        if user is None:
+        if user is None or not user.is_active:
             raise credentials_exception
 
         await _cache_user(user)
