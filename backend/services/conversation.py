@@ -85,6 +85,150 @@ def add_conversation(data, chat_id, db):
     return statement
 
 
+def _history_cache_key(chat_list_id: int) -> str:
+    return f"chat:history:{chat_list_id}"
+
+
+def _conversation_row_to_message(row: Conversation) -> dict:
+    return {
+        "id": row.id,
+        "chat_id": row.chat_id,
+        "temp_id": None,
+        "created_at": row.created_at,
+        "user_type": row.user_type,
+        "statement": row.statement,
+        "streaming": False,
+    }
+
+
+def _message_to_cache_row(msg: dict) -> dict:
+    created_at = msg.get("created_at")
+    return {
+        "id": msg["id"],
+        "chat_id": msg["chat_id"],
+        "user_type": msg["user_type"],
+        "statement": msg["statement"],
+        "created_at": created_at.isoformat()
+        if isinstance(created_at, datetime)
+        else created_at,
+    }
+
+
+def _cache_row_to_message(row: dict) -> dict:
+    return {
+        "id": row["id"],
+        "chat_id": row["chat_id"],
+        "temp_id": None,
+        "created_at": datetime.fromisoformat(row["created_at"])
+        if row.get("created_at")
+        else None,
+        "user_type": row["user_type"],
+        "statement": row["statement"],
+        "streaming": False,
+    }
+
+
+def _message_sort_ts(m: dict) -> float:
+    created_at = m.get("created_at")
+    if created_at is None:
+        return float("-inf")
+    if isinstance(created_at, datetime):
+        if created_at.tzinfo is None:
+            return created_at.replace(tzinfo=timezone.utc).timestamp()
+        return created_at.timestamp()
+    return datetime.fromisoformat(str(created_at)).timestamp()
+
+
+def _sort_messages_asc(messages: list[dict]) -> list[dict]:
+    return sorted(messages, key=lambda m: (_message_sort_ts(m), m.get("id") or 0))
+
+
+def _dedupe_messages_by_id(messages: list[dict]) -> list[dict]:
+    seen_ids: set[int] = set()
+    deduped: list[dict] = []
+    for msg in messages:
+        msg_id = msg.get("id")
+        if msg_id is not None:
+            if msg_id in seen_ids:
+                continue
+            seen_ids.add(msg_id)
+        deduped.append(msg)
+    return deduped
+
+
+def _merge_messages_asc(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    return _sort_messages_asc(_dedupe_messages_by_id(existing + incoming))
+
+
+async def _load_cached_history_rows(redis_client, chat_list_id: int) -> list[dict]:
+    cached = await redis_client.get(_history_cache_key(chat_list_id))
+    if not cached:
+        return []
+    return json.loads(cached)
+
+
+async def _save_cached_history_rows(
+    redis_client, chat_list_id: int, rows: list[dict]
+) -> None:
+    await redis_client.set(
+        _history_cache_key(chat_list_id),
+        json.dumps(rows),
+        ex=settings.chat_data_ttl_seconds,
+    )
+
+
+def _has_older_messages(db: Session, chat_list_id: int, oldest_id: int) -> bool:
+    return (
+        db.query(Conversation.id)
+        .filter(
+            Conversation.chat_id == chat_list_id,
+            Conversation.id < oldest_id,
+        )
+        .first()
+        is not None
+    )
+
+
+def _next_cursor_for_oldest(db: Session, chat_list_id: int, messages: list[dict]) -> int | None:
+    ids = [m["id"] for m in messages if m.get("id") is not None]
+    if not ids:
+        return None
+    oldest_id = min(ids)
+    return oldest_id if _has_older_messages(db, chat_list_id, oldest_id) else None
+
+
+async def _sync_newer_messages_into_cache(
+    redis_client,
+    chat_list_id: int,
+    db: Session,
+    cached_rows: list[dict],
+) -> list[dict]:
+    cached_ids = [row["id"] for row in cached_rows if row.get("id") is not None]
+    if not cached_ids:
+        return cached_rows
+
+    max_id = max(cached_ids)
+    newer = (
+        db.query(Conversation)
+        .filter(
+            Conversation.chat_id == chat_list_id,
+            Conversation.id > max_id,
+        )
+        .order_by(Conversation.created_at.asc(), Conversation.id.asc())
+        .all()
+    )
+    if not newer:
+        return cached_rows
+
+    merged = _merge_messages_asc(
+        [_cache_row_to_message(row) for row in cached_rows],
+        [_conversation_row_to_message(row) for row in newer],
+    )
+    merged_rows = [_message_to_cache_row(msg) for msg in merged]
+    await _save_cached_history_rows(redis_client, chat_list_id, merged_rows)
+    return merged_rows
+
+
 async def get_conversations(chat_list_id: int, db: Session, limit: int = 25, cursor_id: int | None = None):
     
     if not chat_list_id:
@@ -93,83 +237,58 @@ async def get_conversations(chat_list_id: int, db: Session, limit: int = 25, cur
         raise HTTPException(status_code=400, detail="Invalid limit")
 
     redis_client = get_redis()
-    cursor_label = cursor_id if cursor_id is not None else "latest"
-    cache_key = f"chat:history:{chat_list_id}:cursor:{cursor_label}:limit:{limit}"
-  
 
-    # 1) Load DB page (cached) in *chronological* (asc) order for the UI.
+    # Load DB page in *chronological* (asc) order for the UI.
     db_messages: list[dict] = []
     next_cursor_id: int | None = None
- 
-    
-    if redis_client is not None:
-        cached = await redis_client.get(cache_key)
-       
-        if cached:
-            rows = json.loads(cached)
-            # cached rows are stored in asc order already
-            db_messages = [
-                {
-                    "id": row["id"],
-                    "chat_id": row["chat_id"],
-                    "temp_id": None,
-                    "created_at": datetime.fromisoformat(row["created_at"])
-                    if row.get("created_at")
-                    else None,
-                    "user_type": row["user_type"],
-                    "statement": row["statement"],
-                    "streaming": False,
-                }
-                for row in rows
-            ]
-            if len(rows) == limit:
-                # Cursor for "older" page is the oldest DB message id in this page.
-                next_cursor_id = db_messages[0]["id"] if db_messages else None
 
-    if not db_messages:
+    if cursor_id is None and redis_client is not None:
+        cached_rows = await _load_cached_history_rows(redis_client, chat_list_id)
+        if cached_rows:
+            cached_rows = await _sync_newer_messages_into_cache(
+                redis_client, chat_list_id, db, cached_rows
+            )
+            db_messages = [_cache_row_to_message(row) for row in cached_rows]
+            next_cursor_id = _next_cursor_for_oldest(db, chat_list_id, db_messages)
+
+    if cursor_id is not None or not db_messages:
         query = db.query(Conversation).where(Conversation.chat_id == chat_list_id)
         if cursor_id is not None:
             query = query.where(Conversation.id < cursor_id)
 
         rows_desc = (
-            query.order_by(Conversation.created_at.desc(), Conversation.id.desc()).limit(limit).all()
-
+            query.order_by(Conversation.created_at.desc(), Conversation.id.desc())
+            .limit(limit)
+            .all()
         )
         if len(rows_desc) == limit and rows_desc:
-            # Cursor for "older" page is the oldest DB message id in this page.
             next_cursor_id = rows_desc[-1].id
 
-        # Reverse to asc for display.
         rows_asc = list(reversed(rows_desc))
-        db_messages = [
-            {
-                "id": row.id,
-                "chat_id": row.chat_id,
-                "temp_id": None,
-                "created_at": row.created_at,
-                "user_type": row.user_type,
-                "statement": row.statement,
-                "streaming": False,
-            }
-            for row in rows_asc
-        ]
+        page_messages = [_conversation_row_to_message(row) for row in rows_asc]
 
-        if redis_client is not None:
-            payload = json.dumps(
-                [
-                    {
-                        "id": msg["id"],
-                        "chat_id": msg["chat_id"],
-                        "user_type": msg["user_type"],
-                        "statement": msg["statement"],
-                        "created_at": msg["created_at"].isoformat()
-                        if msg.get("created_at")
-                        else None,
-                    }
-                    for msg in db_messages
-                ]
-            )
-            await redis_client.set(cache_key, payload, ex=settings.chat_data_ttl_seconds)
+        if cursor_id is None:
+            db_messages = page_messages
+            if redis_client is not None:
+                await _save_cached_history_rows(
+                    redis_client,
+                    chat_list_id,
+                    [_message_to_cache_row(msg) for msg in db_messages],
+                )
+        else:
+            db_messages = page_messages
+            if redis_client is not None:
+                cached_rows = await _load_cached_history_rows(redis_client, chat_list_id)
+                if cached_rows:
+                    cached_messages = [_cache_row_to_message(row) for row in cached_rows]
+                else:
+                    cached_messages = []
+                merged = _merge_messages_asc(cached_messages, page_messages)
+                await _save_cached_history_rows(
+                    redis_client,
+                    chat_list_id,
+                    [_message_to_cache_row(msg) for msg in merged],
+                )
 
             
     pending = await get_pending_messages(chat_list_id)
@@ -227,18 +346,7 @@ async def get_conversations(chat_list_id: int, db: Session, limit: int = 25, cur
     merged.extend(list(merged_by_temp.values()))
     merged.extend(merged_without_temp)
 
-    def _sort_ts(m: dict) -> float:
-        created_at = m.get("created_at")
-        if created_at is None:
-            return float("-inf")
-        if isinstance(created_at, datetime):
-            # If timezone-naive (DB column uses `timezone=False`), assume UTC for stable ordering.
-            if created_at.tzinfo is None:
-                return created_at.replace(tzinfo=timezone.utc).timestamp()
-            return created_at.timestamp()
-        return datetime.fromisoformat(str(created_at)).timestamp()
-
-    merged.sort(key=_sort_ts)
+    merged.sort(key=_message_sort_ts)
 
     return {"messages": merged, "next_cursor_id": next_cursor_id}
 

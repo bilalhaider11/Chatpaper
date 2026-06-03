@@ -156,7 +156,7 @@ async def get_conversation(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-   _get_owned_convo(db, chat_list_id, current_user)
+    _get_owned_convo(db, chat_list_id, current_user)
     return await conversation_service.get_conversations(
         chat_list_id, db, limit=limit, cursor_id=cursor_id
     )
