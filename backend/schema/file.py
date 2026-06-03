@@ -26,6 +26,20 @@ class FileRecordResponse(FileRecordBase):
         return f"/files/{self.id}/download"
 
 
+class UploadResponse(BaseModel):
+    id: int
+    filename: str
+    filesize: int
+    ingestion_status: str | None = None
+    conversation_id: int
+    reactivated: bool = False
+
+    @computed_field
+    @property
+    def download_url(self) -> str:
+        return f"/files/{self.id}/download"
+
+
 class IngestionStatusResponse(BaseModel):
     id: int
     file_id: int

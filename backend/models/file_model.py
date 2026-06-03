@@ -9,7 +9,7 @@ class FileRecord(Base):
     __tablename__ = "files_data"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
     filename = Column("file_name", String(255), nullable=False)
     filepath = Column("file_url", Text(), nullable=False)

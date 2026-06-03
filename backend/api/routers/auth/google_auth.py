@@ -1,31 +1,33 @@
 import logging
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import httpx
 from authlib.integrations.starlette_client import OAuth
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import create_access_token
 from core.config import settings
 from core.dependencies import get_db
-from schema import auth as schema_auth
 from services import auth as service_auth
+from schema import auth as schema_auth
 
 logger = logging.getLogger(__name__)
 
-oauth = OAuth()
-oauth.register(
-    name="google",
-    client_id=settings.google_client_id,
-    client_secret=settings.google_client_secret,
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile"},
-    authorize_params=None
+_OAUTH_CODE_TTL = 60  # seconds; single-use code exchanged by the frontend
 
-)
+oauth = OAuth()
+if settings.google_client_id and settings.google_client_secret:
+    oauth.register(
+        name="google",
+        client_id=settings.google_client_id,
+        client_secret=settings.google_client_secret,
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+        authorize_params=None,
+    )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -60,17 +62,13 @@ async def google_login(request: Request):
 
 
 @router.get("")
-async def google_callback(request: Request, db: Session = Depends(get_db)):
+async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         token = await oauth.google.authorize_access_token(request)
-        
     except Exception as exc:
         logger.exception("Google token exchange failed")
-        raise HTTPException(
-            status_code=401,
-            detail=f"Google authentication failed: {exc}",
-        ) from exc
-    
+        raise HTTPException(status_code=401, detail="Google authentication failed.") from exc
+
     user_info = token.get("userinfo")
     if not user_info and token.get("access_token"):
         async with httpx.AsyncClient() as client:
@@ -89,20 +87,16 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
     if iss not in ("https://accounts.google.com", "accounts.google.com") or not user_email:
         raise HTTPException(status_code=401, detail="Google authentication failed.")
 
-    userData = service_auth.get_user_by_email(db, user_email)
-    if userData is None:
-        new_user = schema_auth.UserLogin(
-            email=user_email,
-            loggedin_by_google=True,
-        )
-        userData = service_auth.create_new_user(db, new_user, track_google_login=True)
+    user_data = await service_auth.get_user_by_email(db, user_email)
+    if user_data is None:
+        user_data = await service_auth.create_google_user(db, user_email)
 
     login_code = secrets.token_urlsafe(32)
-          
+
     try:
         await service_auth.create_google_login_code(
             login_code,
-            userData,
+            user_data,
             ttl_seconds=settings.google_login_code_expire_seconds,
         )
     except service_auth.RedisUnavailableError as exc:
@@ -118,12 +112,11 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
     return RedirectResponse(url=redirect_target, status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.post("/exchange-code", response_model=schema_auth.Token)
+@router.post("/exchange-token", response_model=schema_auth.Token)
 async def exchange_google_login_code(
     payload: schema_auth.GoogleCodeExchange,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    
     code = payload.code.strip()
     if not code:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Login code is required.")
@@ -139,7 +132,7 @@ async def exchange_google_login_code(
             detail="Authentication service temporarily unavailable.",
         ) from exc
 
-    user = service_auth.get_user_by_id(db, int(login_data["user_id"]))
+    user = await service_auth.get_user_by_id(db, int(login_data["user_id"]))
     if user.email != login_data["email"]:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid login code payload.")
 

@@ -144,7 +144,7 @@ export async function deleteConversationList(conversationListid: number) {
 export async function editConversationListTitle(list_id: number, title: string) {
   const response = await api.patch(
     `/conversation/conversation-title/${list_id}`,
-    { title }
+    { conversation_title: title }
   );
   return response.data;
 }

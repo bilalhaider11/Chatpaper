@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { exchangeGoogleCode, login, signup, tokenStore } from "../../api/axios";
+import { exchangeOAuthCode, login, signup } from "../../api/axios";
+import { tokenStore } from "../../api/axios";
 import { GoogleAuthButton } from "../../components/login/google_auth";
 
 type LoginProps = {
@@ -18,47 +19,49 @@ function Login({ onLoginSuccess }: LoginProps) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Ref instead of state: read synchronously inside handleSubmit before re-render.
+  const actionRef = useRef<"login" | "signup">("login");
 
   useEffect(() => {
-    const oauthCode = searchParams.get("code");
-    if (!oauthCode) {
-      return;
-    }
+    const code = searchParams.get("code");
+    if (!code) return;
 
-    const exchangeCode = async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const exchangeRes = await exchangeGoogleCode(oauthCode);
-        tokenStore.setToken(exchangeRes.access_token);
-        setSearchParams({}, { replace: true });
+    setLoading(true);
+    setSearchParams({}, { replace: true });
+    exchangeOAuthCode(code)
+      .then((data) => {
+        tokenStore.setToken(data.access_token);
         onLoginSuccess();
         navigate("/", { replace: true });
-      } catch {
-        setError("Google login failed. Please try again.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    exchangeCode();
+      })
+      .catch(() => setError("Google sign-in failed. Please try again."))
+      .finally(() => setLoading(false));
   }, [searchParams, setSearchParams, onLoginSuccess, navigate]);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: { preventDefault(): void }) => {
     event.preventDefault();
     setError("");
     setLoading(true);
 
+    const isSignup = actionRef.current === "signup";
+
     try {
-      if (login_signup) {
+      if (isSignup) {
         await signup(email, password);
       }
       const login_res = await login(email, password);
       tokenStore.setToken(login_res.access_token);
       onLoginSuccess();
       navigate("/", { replace: true });
-    } catch {
-      setError("Invalid credentials. Please try again.");
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (isSignup && status === 400) {
+        setError("Email already registered.");
+      } else if (isSignup && status === 403) {
+        setError("Registration is currently closed.");
+      } else {
+        setError("Invalid credentials. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -92,7 +95,10 @@ function Login({ onLoginSuccess }: LoginProps) {
         />
         {error ? <p className="m-0 text-sm text-red-300">{error}</p> : null}
         <button
-          onClick={() => setlogin_signup(false)}
+          onClick={() => {
+            actionRef.current = "login";
+            setlogin_signup(false);
+          }}
           type="submit"
           disabled={loading}
           className="mt-1 cursor-pointer rounded-[10px] border-0 bg-gradient-to-br from-blue-600 to-blue-700 px-3 py-2.5 font-semibold text-white disabled:cursor-wait disabled:opacity-75"
@@ -100,7 +106,10 @@ function Login({ onLoginSuccess }: LoginProps) {
           {loading ? "Signing in..." : "Login"}
         </button>
         <button
-          onClick={() => setlogin_signup(true)}
+          onClick={() => {
+            actionRef.current = "signup";
+            setlogin_signup(true);
+          }}
           type="submit"
           disabled={loading}
           className="cursor-pointer rounded-[10px] border-0 bg-gradient-to-br from-blue-600 to-blue-700 px-3 py-2.5 font-semibold text-white disabled:cursor-wait disabled:opacity-75"

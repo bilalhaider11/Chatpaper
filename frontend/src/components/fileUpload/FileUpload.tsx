@@ -69,7 +69,7 @@ function FileUpload({
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    multiple: true,
+    multiple: false,
     accept: ACCEPTED_FILE_TYPES,
   });
 

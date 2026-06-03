@@ -71,3 +71,6 @@ certifi==2026.4.22
 charset-normalizer==3.4.7
 idna==3.6
 urllib3==2.7.0
+
+asyncpg==0.29.0
+slowapi==0.1.9

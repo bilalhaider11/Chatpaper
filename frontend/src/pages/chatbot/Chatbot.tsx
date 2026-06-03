@@ -359,12 +359,23 @@ function Chatbot() {
   const handleUploadSuccess = async (file: FileRecord) => {
     setCreatingChat(true);
     try {
-      const newConversation = await createConversationList(file.id);
-      setConversations((prev) => [newConversation, ...prev]);
-      setSelectedConversationId(newConversation.id);
-      setMessages([]);
-      setLiveMessages([]);
-      setNextCursorId(null);
+      const list = await loadConversationList();
+      const existing =
+        file.conversation_id != null
+          ? list.find((item) => item.id === file.conversation_id)
+          : list.find((item) => item.file_id === file.id);
+
+      const conversation =
+        existing ?? (await createConversationList(file.id));
+
+      if (!existing) {
+        setConversations((prev) => [conversation, ...prev]);
+      } else {
+        setConversations(list);
+      }
+
+      setSelectedConversationId(conversation.id);
+      await loadMessages(conversation.id);
       setisopen(false);
     } catch (error) {
       console.error("Failed to start chat after upload:", error);

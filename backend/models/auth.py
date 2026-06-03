@@ -15,7 +15,7 @@ class User(CommonModel):
 
     email = Column(String, unique=True, index=True, nullable=False)
     password = Column(String, nullable=True)
-    loggedin_by_google = Column(Boolean, nullable=False, default=False)
+    auth_provider = Column(String, nullable=False, server_default="password")
 
     role = Column(Enum(UserRole), default=UserRole.user)
 

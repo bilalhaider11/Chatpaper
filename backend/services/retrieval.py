@@ -3,8 +3,8 @@ from __future__ import annotations
 import dataclasses
 import logging
 
-from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.chroma import (
     get_child_chunks_collection,
@@ -106,11 +106,11 @@ def _summary_route(
     return [int(m["file_id"]) for m in metas]
 
 
-def _bm25_retrieve(
+async def _bm25_retrieve(
     query: str,
     user_id: int,
     file_ids: list[int] | None,
-    db: Session,
+    db: AsyncSession,
     n: int,
 ) -> dict[str, float]:
     params: dict = {"query": query, "user_id": user_id, "limit": n}
@@ -133,7 +133,8 @@ def _bm25_retrieve(
         LIMIT :limit
     """)
     try:
-        rows = db.execute(sql, params).fetchall()
+        result = await db.execute(sql, params)
+        rows = result.fetchall()
     except Exception:
         logger.exception("BM25 retrieval failed")
         return {}
@@ -148,10 +149,10 @@ def _rrf(ranked_lists: list[list[str]], k: int = 60) -> dict[str, float]:
     return scores
 
 
-def retrieve(
+async def retrieve(
     query: str,
     user_id: int,
-    db: Session,
+    db: AsyncSession,
     file_ids: list[int] | None = None,
     top_k: int = 5,
     use_summary_routing: bool = True,
@@ -159,7 +160,7 @@ def retrieve(
     use_propositions: bool = False,
 ) -> list[RetrievedContext]:
     embedder = get_embedder()
-    query_embedding = embedder.embed_query(query)
+    query_embedding = await embedder.aembed_query(query)
 
     # narrow the child chunk search to files that match the query at the document level
     routing_file_ids = file_ids
@@ -176,7 +177,7 @@ def retrieve(
         ranked_lists.append(sorted(dense_scores, key=lambda p: dense_scores[p], reverse=True))
 
     if use_bm25:
-        bm25_scores = _bm25_retrieve(query, user_id, routing_file_ids, db, fetch_n)
+        bm25_scores = await _bm25_retrieve(query, user_id, routing_file_ids, db, fetch_n)
         if bm25_scores:
             ranked_lists.append(sorted(bm25_scores, key=lambda p: bm25_scores[p], reverse=True))
 
@@ -195,15 +196,15 @@ def retrieve(
         if fused[p] >= min_score
     ][:top_k]
 
-    rows = (
-        db.query(DocumentParent, FileRecord.filename)
+    result = await db.execute(
+        select(DocumentParent, FileRecord.filename)
         .join(FileRecord, DocumentParent.file_id == FileRecord.id)
-        .filter(
+        .where(
             DocumentParent.id.in_(top_ids),
-            FileRecord.user_id == user_id,  # re-enforce ownership at DB level; chroma filter alone is not enough
+            FileRecord.user_id == user_id,  # re-enforce ownership at DB level
         )
-        .all()
     )
+    rows = result.all()
 
     parent_map = {dp.id: (dp, fname) for dp, fname in rows}
     results: list[RetrievedContext] = []

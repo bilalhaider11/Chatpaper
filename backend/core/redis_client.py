@@ -17,7 +17,11 @@ async def start_redis() -> None:
         await client.ping()
         _redis = client
         logger.info("Redis connected at %s", settings.redis_url)
-    except Exception:
+    except Exception as exc:
+        if settings.require_redis:
+            raise RuntimeError(
+                f"REQUIRE_REDIS=true but Redis is unreachable at {settings.redis_url}: {exc}"
+            ) from exc
         logger.warning(
             "Redis unavailable (%s); chat cache will use in-memory fallback",
             settings.redis_url,

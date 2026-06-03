@@ -10,6 +10,17 @@ logger = logging.getLogger(__name__)
 
 FLUSH_QUEUE_KEY = "chat:flush:queue"
 
+# Atomically reads and clears the flush queue in a single round-trip,
+# preventing message loss from concurrent drain calls (TOCTOU between LRANGE + DEL).
+_DRAIN_QUEUE_SCRIPT = (
+    "local i=redis.call('LRANGE',KEYS[1],0,-1) "
+    "if #i>0 then redis.call('DEL',KEYS[1]) end "
+    "return i"
+)
+
+# Registered script handle (uses EVALSHA for efficiency); populated lazily on first use.
+_drain_script = None
+
 
 @dataclass
 class QueuedChatMessage:
@@ -46,6 +57,9 @@ def _message_from_json(raw: str) -> QueuedChatMessage:
     )
 
 
+_MAX_IN_MEMORY_STREAMS = 500
+
+
 class InMemoryChatCache:
     def __init__(self) -> None:
         self._flush_queue: list[str] = []
@@ -77,8 +91,10 @@ class InMemoryChatCache:
 
     async def append_stream_chunk(self, chat_id: int, temp_id: str, chunk: str) -> None:
         key = _stream_key(chat_id, temp_id)
-        if key not in self._streams:
+        if key not in self._streams and len(self._streams) >= _MAX_IN_MEMORY_STREAMS:
+            # Evict the oldest stream (insertion-ordered dict).
             self._stream_started_at[key] = datetime.now(timezone.utc).isoformat()
+            self._streams.pop(next(iter(self._streams)), None)
         self._streams[key] = self._streams.get(key, "") + chunk
 
     async def get_active_streams(self, chat_id: int) -> list[dict]:
@@ -91,7 +107,7 @@ class InMemoryChatCache:
             results.append(
                 {
                     "temp_id": temp_id,
-                    "user_type": "system",
+                    "user_type": "assistant",
                     "statement": statement,
                     "streaming": True,
                     "created_at": self._stream_started_at.get(key),
@@ -125,16 +141,23 @@ async def enqueue_message(message: QueuedChatMessage) -> None:
     await pipe.execute()
 
 
+def _streamset_key(chat_id: int) -> str:
+    return f"chat:streamset:{chat_id}"
+
+
 async def drain_flush_queue() -> list[QueuedChatMessage]:
+    global _drain_script
     redis_client = get_redis()
     if redis_client is None:
         return await _memory_cache.drain_flush_queue()
 
-    payloads = await redis_client.lrange(FLUSH_QUEUE_KEY, 0, -1)
+    if _drain_script is None:
+        _drain_script = redis_client.register_script(_DRAIN_QUEUE_SCRIPT)
+
+    payloads = await _drain_script(keys=[FLUSH_QUEUE_KEY])
     if not payloads:
         return []
 
-    await redis_client.delete(FLUSH_QUEUE_KEY)
     messages = [_message_from_json(item) for item in payloads]
 
     pipe = redis_client.pipeline()
@@ -169,6 +192,7 @@ async def append_stream_chunk(chat_id: int, temp_id: str, chunk: str) -> None:
 
     key = _stream_key(chat_id, temp_id)
     started_at_key = _stream_started_at_key(chat_id, temp_id)
+    sset = _streamset_key(chat_id)
     pipe = redis_client.pipeline()
     started_at = datetime.now(timezone.utc).isoformat()
     # Record the first-seen timestamp once per stream for stable sorting.
@@ -176,6 +200,9 @@ async def append_stream_chunk(chat_id: int, temp_id: str, chunk: str) -> None:
     pipe.append(key, chunk)
     pipe.expire(key, settings.chat_stream_ttl_seconds)
     pipe.expire(started_at_key, settings.chat_stream_ttl_seconds)
+    # Track this stream key in a SET so get_active_streams avoids SCAN.
+    pipe.sadd(sset, key)
+    pipe.expire(sset, settings.chat_stream_ttl_seconds)
     await pipe.execute()
 
 
@@ -184,24 +211,28 @@ async def get_active_streams(chat_id: int) -> list[dict]:
     if redis_client is None:
         return await _memory_cache.get_active_streams(chat_id)
 
+    sset = _streamset_key(chat_id)
+    keys = await redis_client.smembers(sset)
+    if not keys:
+        return []
+
     prefix = f"chat:stream:{chat_id}:"
     results: list[dict] = []
-    async for key in redis_client.scan_iter(match=f"{prefix}*"):
+    dead_keys: list[str] = []
+    for key in keys:
         statement = await redis_client.get(key)
         if not statement:
+            dead_keys.append(key)
             continue
         temp_id = key.removeprefix(prefix)
         started_at_key = _stream_started_at_key(chat_id, temp_id)
         created_at = await redis_client.get(started_at_key)
-        results.append(
-            {
-                "temp_id": temp_id,
-                "user_type": "system",
-                "statement": statement,
-                "streaming": True,
-                "created_at": created_at,
-            }
-        )
+        results.append({"temp_id": temp_id, "user_type": "assistant", "statement": statement, "streaming": True, "created_at": created_at})
+
+                
+    if dead_keys:
+        await redis_client.srem(sset, *dead_keys)
+
     return results
 
 

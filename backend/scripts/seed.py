@@ -27,8 +27,7 @@ def seed_admin() -> None:
             password=pwd_context.hash(settings.admin_password),
             role=UserRole.admin,
             is_active=True,
-            loggedin_by_google=False
-        
+            auth_provider="password"
         )
         db.add(admin)
         db.commit()

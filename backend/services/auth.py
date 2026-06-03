@@ -5,7 +5,8 @@ import secrets
 from fastapi import HTTPException
 from passlib.context import CryptContext
 from redis.exceptions import RedisError
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.redis_client import get_redis
 from models.auth import User
@@ -69,49 +70,63 @@ async def consume_google_login_code(code: str) -> dict[str, str | int]:
     return {"user_id": user_id, "email": email}
 
 
-def get_user_by_email(db: Session, email: str) -> User | None:
-    return db.query(User).filter(User.email == email, User.is_active == True).first()
+async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
+    result = await db.execute(
+        select(User).where(User.email == email, User.is_active == True)  # noqa: E712
+    )
+    return result.scalars().first()
 
 
-def get_user_by_id(db: Session, user_id: int) -> User:
-    db_user = db.query(User).filter(User.id == user_id).first()
-    if db_user is None:
+async def get_user_by_id(db: AsyncSession, user_id: int) -> User:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+    if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    return db_user
+    return user
 
 
-def create_new_user(db: Session, user: schema_auth.UserCreate, track_google_login: bool = False) -> User:
-    if track_google_login:
-        hashed_password = None
-    else:
-        hashed_password = pwd_context.hash(user.password)
-    new_user = User(email=user.email, password=hashed_password, loggedin_by_google=track_google_login)
+async def create_new_user(db: AsyncSession, user: schema_auth.UserCreate) -> User:
+    hashed_password = pwd_context.hash(user.password)
+    new_user = User(email=user.email, password=hashed_password, auth_provider="password")
     db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    await db.commit()
+    await db.refresh(new_user)
     return new_user
 
 
-def read_all_user(db: Session, skip: int, limit: int) -> list[User]:
-    return db.query(User).offset(skip).limit(limit).all()
+async def create_google_user(db: AsyncSession, email: str) -> User:
+    new_user = User(email=email, password=None, auth_provider="google")
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+    return new_user
 
 
-def update_user(db: Session, user_id: int, user: schema_auth.UserUpdate) -> User:
-    db_user = get_user_by_id(db, user_id)
+async def read_all_user(db: AsyncSession, skip: int, limit: int) -> list[User]:
+    result = await db.execute(select(User).offset(skip).limit(limit))
+    return list(result.scalars().all())
+
+
+async def update_user(db: AsyncSession, user_id: int, user: schema_auth.UserUpdate) -> User:
+    db_user = await get_user_by_id(db, user_id)
     updated_data = user.model_dump(exclude_unset=True)
     for key, value in updated_data.items():
         if key == "password":
             value = pwd_context.hash(value)
         setattr(db_user, key, value)
     db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
+    await db.commit()
+    await db.refresh(db_user)
+    from core.auth import invalidate_user_cache
+    await invalidate_user_cache(user_id)
     return db_user
 
 
-def delete_user(db: Session, user_id: int) -> dict:
-    db_user = get_user_by_id(db, user_id)
+async def delete_user(db: AsyncSession, user_id: int) -> dict:
+    db_user = await get_user_by_id(db, user_id)
     user_data = {"id": db_user.id, "email": db_user.email, "role": db_user.role}
     db.delete(db_user)
-    db.commit()
+    await db.commit()
+    from core.auth import invalidate_user_cache
+    await invalidate_user_cache(user_id)
     return user_data
