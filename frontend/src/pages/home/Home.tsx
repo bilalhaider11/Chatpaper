@@ -3,7 +3,6 @@ import { Link, useNavigate } from "react-router-dom";
 import FileUpload from "../../components/fileUpload/FileUpload";
 import "./Home.css";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
-import { createConversationList } from "../../services/conversation_api";
 
 type HomeProps = {
   onLogout: () => void;
@@ -13,7 +12,6 @@ function Home({ onLogout }: HomeProps) {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -26,6 +24,7 @@ function Home({ onLogout }: HomeProps) {
         setUser(currentUser);
       } catch {
         tokenStore.clear();
+        onLogout();
         navigate("/login", { replace: true });
       } finally {
         setLoading(false);
@@ -34,15 +33,6 @@ function Home({ onLogout }: HomeProps) {
 
     void bootstrap();
   }, [navigate]);
-
-  const handleStartChat = async () => {
-    try {
-      await createConversationList();
-      navigate("/chatbot");
-    } catch {
-      setMessage("Failed to start chat.");
-    }
-  };
 
   const logout = () => {
     tokenStore.clear();
@@ -61,10 +51,7 @@ function Home({ onLogout }: HomeProps) {
           <div className="home-topbar">
             <div className="home-badge">File Processing Platform</div>
             <div className="home-actions">
-              <button type="button" onClick={() => void handleStartChat()}>
-                Start chat
-              </button>
-              <Link to="/chatbot">Open chatbot</Link>
+              <Link to="/chat" state={{ openUpload: true }}>Open chatbot</Link>
               <button onClick={logout}>Logout</button>
             </div>
           </div>
@@ -86,7 +73,6 @@ function Home({ onLogout }: HomeProps) {
             <li>Enterprise-grade architecture and support</li>
           </ul>
 
-          {message ? <p className="home-status-message">{message}</p> : null}
         </div>
 
         <div className="home-right">

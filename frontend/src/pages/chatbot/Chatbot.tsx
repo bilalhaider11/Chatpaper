@@ -1,8 +1,7 @@
 import "./Chatbot.css";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
-import SystemMessageModal from "../../components/chatbot/SystemMessageModal";
 import FileUpload from "../../components/fileUpload/FileUpload";
 import { DeleteIcon, EditIcon } from "../../components/icons/ActionIcons";
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
@@ -11,35 +10,42 @@ import {
   ChatWsEvent,
   Conversation,
   ConversationListItem,
-  createConversationList,
-  getConversation,
-  getConversationList,
   LiveMessage,
-  normalizeUserType,
+  createConversationList,
   deleteConversationList,
   editConversationListTitle,
+  getConversation,
+  getConversationList,
+  normalizeUserType,
 } from "../../services/conversation_api";
 
 function Chatbot() {
+  const { conversationId: urlId } = useParams<{ conversationId?: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const openUploadOnLoad = (location.state as { openUpload?: boolean } | null)?.openUpload === true;
+
   const [editingId, setEditingId] = useState(0);
   const [editTitle, setEditTitle] = useState("");
-  const [isopen, setisopen] = useState(false);
-  const [systemModalOpen, setSystemModalOpen] = useState(false);
-  const navigate = useNavigate();
+  const [isopen, setisopen] = useState(openUploadOnLoad);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [user, setUser] = useState<User | null>(null);
   const [input, setInput] = useState("");
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
-  const [selectedConversationId, setSelectedConversationId] = useState<number | null>(
-    null
-  );
+  const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
+  // Ref mirrors selectedConversationId so the Loader can check without stale closure
+  const selectedConvRef = useRef<number | null>(null);
   const [hasUploadedFile, setHasUploadedFile] = useState(false);
   const [messages, setMessages] = useState<Conversation[]>([]);
   const [liveMessages, setLiveMessages] = useState<LiveMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingChat, setCreatingChat] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [sendingSystem, setSendingSystem] = useState(false);
+
+  const isStreaming = liveMessages.some((m) => m.streaming);
+
+  useEffect(() => {
+    selectedConvRef.current = selectedConversationId;
+  }, [selectedConversationId]);
 
   const loadConversationList = async () => {
     const list = await getConversationList();
@@ -47,120 +53,83 @@ function Chatbot() {
     return list;
   };
 
-  const loadMessages = async (conversationListId: number) => {
-    const data = await getConversation(conversationListId);
-    setMessages(data);
-    setLiveMessages([]);
-  };
-
-  const handleWsEvent = useCallback((event: ChatWsEvent) => {
-    if (event.type === "error") return;
-
-    if (event.type === "message") {
-      setLiveMessages((prev) => {
-        if (prev.some((item) => item.tempId === event.temp_id)) return prev;
-        return [
-          ...prev,
-          {
-            tempId: event.temp_id,
-            user_type: normalizeUserType(event.user_type),
-            statement: event.statement,
-          },
-        ];
-      });
-      return;
-    }
-
-    if (event.type === "chunk") {
-      setLiveMessages((prev) => {
-        const index = prev.findIndex((item) => item.tempId === event.temp_id);
-        if (index >= 0) {
-          const next = [...prev];
-          next[index] = {
-            ...next[index],
-            statement: next[index].statement + event.chunk,
-            streaming: true,
-          };
-          return next;
-        }
-        return [
-          ...prev,
-          {
-            tempId: event.temp_id,
-            user_type: "system",
-            statement: event.chunk,
-            streaming: true,
-          },
-        ];
-      });
-      return;
-    }
-
-    if (event.type === "done") {
-      setLiveMessages((prev) => {
-        const index = prev.findIndex((item) => item.tempId === event.temp_id);
-        if (index >= 0) {
-          const next = [...prev];
-          next[index] = {
-            ...next[index],
-            statement: event.statement,
-            streaming: false,
-            id: event.id,
-          };
-          return next;
-        }
-        return [
-          ...prev,
-          {
-            tempId: event.temp_id,
-            user_type: "system",
-            statement: event.statement,
-          },
-        ];
-      });
-    }
-  }, []);
-
-  const { sendMessage: sendWsMessage } = useChatWebSocket({
-    chatListId: selectedConversationId,
-    onEvent: handleWsEvent,
-    enabled: Boolean(selectedConversationId),
-  });
-
   const displayedMessages = useMemo(() => {
+    const stripCitations = (text: string) => text.replace(/\s*\[\d+\]/g, "");
+
     const persisted = messages.map((message) => ({
       key: `db-${message.id}`,
       user_type: normalizeUserType(message.user_type),
-      statement: message.statement,
+      statement: stripCitations(message.statement),
       streaming: false,
+      pending: false,
     }));
 
     const live = liveMessages.map((message) => ({
       key: message.tempId,
       user_type: message.user_type,
-      statement: message.statement,
+      statement: stripCitations(message.statement),
       streaming: Boolean(message.streaming),
+      pending: Boolean(message.pending),
     }));
 
     return [...persisted, ...live];
   }, [messages, liveMessages]);
 
+  const handleWsEvent = useCallback((event: ChatWsEvent) => {
+    if (event.type === "chunk") {
+      setLiveMessages((prev) => {
+        const existing = prev.find((m) => m.tempId === event.temp_id);
+        if (existing) {
+          return prev.map((m) =>
+            m.tempId === event.temp_id
+              ? { ...m, statement: event.chunk }
+              : m
+          );
+        }
+        // First chunk — remove pending placeholder, create streaming message
+        return [
+          ...prev.filter((m) => !m.pending),
+          {
+            tempId: event.temp_id,
+            user_type: "system" as const,
+            statement: event.chunk,
+            streaming: true,
+          },
+        ];
+      });
+    } else if (event.type === "done") {
+      setLiveMessages((prev) =>
+        prev.map((m) =>
+          m.tempId === event.temp_id
+            ? { ...m, statement: event.statement, streaming: false }
+            : m
+        )
+      );
+    } else if (event.type === "error") {
+      setLiveMessages((prev) => prev.filter((m) => !m.streaming));
+    }
+  }, []);
+
+  const { sendMessage: sendWsMessage, status: wsStatus } = useChatWebSocket({
+    chatListId: selectedConversationId,
+    onEvent: handleWsEvent,
+    enabled: !loading,
+  });
+
+  // Phase 1 — runs once on mount: auth, user, conversation list
   useEffect(() => {
-    const bootstrap = async () => {
+    const init = async () => {
       if (!tokenStore.getToken()) {
         navigate("/login", { replace: true });
         return;
       }
-
       try {
         const currentUser = await fetchCurrentUser();
         setUser(currentUser);
-        const list = await loadConversationList();
+        const list = await getConversationList();
+        setConversations(list);
         if (list.length > 0) {
           setHasUploadedFile(true);
-          setisopen(false);
-          setSelectedConversationId(list[0].id);
-          await loadMessages(list[0].id);
         } else {
           const files = await getFiles();
           setHasUploadedFile(files.length > 0);
@@ -173,43 +142,64 @@ function Chatbot() {
         setLoading(false);
       }
     };
-
-    void bootstrap();
+    void init();
   }, [navigate]);
+
+  // Phase 2 — runs when URL param or init-loading state changes
+  // Validates the conversation and loads its messages; redirects on 404 / wrong user.
+  // When no conversationId in URL, auto-navigates to the first conversation.
+  useEffect(() => {
+    if (loading) return;
+
+    const parsedId = urlId !== undefined ? parseInt(urlId, 10) : null;
+    if (parsedId !== null && isNaN(parsedId)) {
+      navigate("/chat", { replace: true });
+      return;
+    }
+
+    const run = async () => {
+      if (parsedId !== null) {
+        if (selectedConvRef.current === parsedId) return; // already on this conv
+        try {
+          setSelectedConversationId(parsedId);
+          const data = await getConversation(parsedId);
+          setMessages(data);
+          setLiveMessages([]);
+        } catch {
+          // conv not found or belongs to another user
+          navigate("/chat", { replace: true });
+        }
+      } else if (conversations.length > 0) {
+        // No ID in URL — redirect to first conversation
+        navigate(`/chat/${conversations[0].id}`, { replace: true });
+      }
+      // No URL ID and no conversations: stay at /chat, upload modal is open
+    };
+
+    void run();
+    // conversations is accessed here but intentionally not a dep: it is read
+    // only in the "no URL ID" branch which fires on the same render batch as
+    // init (when loading flips to false), so it is never stale in that path.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlId, loading, navigate]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [displayedMessages]);
 
-  const handleSelectConversation = async (conversationListId: number) => {
-    setSelectedConversationId(conversationListId);
-    await loadMessages(conversationListId);
+  // Selecting a conversation = update the URL; the Loader handles the rest
+  const handleSelectConversation = (conversationListId: number) => {
+    navigate(`/chat/${conversationListId}`);
   };
 
-  const handleStartChat = async () => {
-    if (!hasUploadedFile) {
-      setisopen(true);
-      return;
-    }
-
-    setCreatingChat(true);
-    try {
-      const newConversation = await createConversationList();
-      setConversations((prev) => [newConversation, ...prev]);
-      setSelectedConversationId(newConversation.id);
-      setMessages([]);
-      setLiveMessages([]);
-    } finally {
-      setCreatingChat(false);
-    }
+  const handleStartChat = () => {
+    setisopen(true);
   };
 
-  const sendChatMessage = async (
-    text: string,
-    userType: "user" | "system",
-    setBusy: (value: boolean) => void
-  ) => {
-    if (!text.trim() || sending || sendingSystem) return;
+  const handleSend = async (event?: { preventDefault(): void }) => {
+    event?.preventDefault();
+    const text = input.trim();
+    if (!text || isStreaming || creatingChat) return;
 
     let conversationListId = selectedConversationId;
 
@@ -223,38 +213,36 @@ function Chatbot() {
         const newConversation = await createConversationList();
         setConversations((prev) => [newConversation, ...prev]);
         conversationListId = newConversation.id;
+        // Set state directly so the WS hook reconnects immediately,
+        // and update the ref so the Loader skips re-loading this conv.
         setSelectedConversationId(newConversation.id);
+        selectedConvRef.current = newConversation.id;
+        navigate(`/chat/${newConversation.id}`, { replace: true });
       } finally {
         setCreatingChat(false);
       }
     }
 
-    setBusy(true);
+    const userTempId = `user-${crypto.randomUUID()}`;
+    setLiveMessages((prev) => [
+      ...prev,
+      { tempId: userTempId, user_type: "user" as const, statement: text },
+    ]);
+    setInput("");
 
-    const sent = sendWsMessage(text, userType);
+    const sent = sendWsMessage(text);
     if (!sent) {
-      setBusy(false);
-      return;
+      setLiveMessages((prev) => prev.filter((m) => m.tempId !== userTempId));
+      setInput(text);
+    } else {
+      setLiveMessages((prev) => [
+        ...prev,
+        { tempId: "pending-ai", user_type: "system" as const, statement: "", streaming: true, pending: true },
+      ]);
     }
-
-    if (userType === "user") {
-      setInput("");
-    }
-
-    setBusy(false);
   };
 
-  const handleSend = async (event?: FormEvent) => {
-    event?.preventDefault();
-    const text = input.trim();
-    if (!text) return;
-    await sendChatMessage(text, "user", setSending);
-  };
-
-  const handleSystemSend = async (text: string) => {
-    await sendChatMessage(text, "system", setSendingSystem);
-  };
-
+  // System messages still use HTTP (no streaming pattern needed)
   const logout = () => {
     tokenStore.clear();
     navigate("/login", { replace: true });
@@ -265,10 +253,10 @@ function Chatbot() {
     const list = await loadConversationList();
     if (selectedConversationId === id) {
       const nextId = list[0]?.id ?? null;
-      setSelectedConversationId(nextId);
       if (nextId) {
-        await loadMessages(nextId);
+        navigate(`/chat/${nextId}`, { replace: true });
       } else {
+        navigate("/chat", { replace: true });
         setMessages([]);
         setLiveMessages([]);
         const files = await getFiles();
@@ -288,11 +276,8 @@ function Chatbot() {
       setHasUploadedFile(true);
       const list = await loadConversationList();
       if (list.length > 0) {
-        setSelectedConversationId(list[0].id);
-        setMessages([]);
-        setLiveMessages([]);
-        await loadMessages(list[0].id);
         setisopen(false);
+        navigate(`/chat/${list[0].id}`);
       }
     } catch (error) {
       console.error("Failed to start chat after upload:", error);
@@ -300,11 +285,9 @@ function Chatbot() {
     }
   };
 
-  const handleSaveEdit = async (e: React.FormEvent, id: number) => {
+  const handleSaveEdit = async (e: { preventDefault(): void }, id: number) => {
     e.preventDefault();
-
     if (!editTitle.trim()) return;
-
     try {
       await editConversationListTitle(editingId, editTitle);
       setConversations((prev) =>
@@ -312,7 +295,6 @@ function Chatbot() {
           item.id === id ? { ...item, conversation_title: editTitle } : item
         )
       );
-
       setEditingId(0);
     } catch (error) {
       console.error("Failed to update title:", error);
@@ -348,11 +330,13 @@ function Chatbot() {
             <p className="sidebar-empty">No conversations yet. Start a new chat.</p>
           ) : (
             conversations.map((conversation) => (
-              <button
+              <div
                 key={conversation.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 className={`conversation-item${conversation.id === selectedConversationId ? " active" : ""}`}
-                onClick={() => void handleSelectConversation(conversation.id)}
+                onClick={() => handleSelectConversation(conversation.id)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleSelectConversation(conversation.id); }}
               >
                 {editingId === conversation.id ? (
                   <form
@@ -409,7 +393,7 @@ function Chatbot() {
                     </div>
                   </>
                 )}
-              </button>
+              </div>
             ))
           )}
         </nav>
@@ -430,14 +414,14 @@ function Chatbot() {
             <h1>{activeConversation?.conversation_title ?? "Assistant"}</h1>
             <span>{user?.email}</span>
           </div>
-          <button
-            type="button"
-            className="system-msg-btn"
-            onClick={() => setSystemModalOpen(true)}
-            disabled={!selectedConversationId || creatingChat}
-          >
-            System message
-          </button>
+          <div className="chatbot-header-actions">
+            {wsStatus === "failed" && (
+              <span className="ws-status-badge ws-failed">Connection lost</span>
+            )}
+            {wsStatus === "connecting" && (
+              <span className="ws-status-badge ws-reconnecting">Connecting…</span>
+            )}
+          </div>
         </header>
 
         <section className="chatbot-messages">
@@ -470,15 +454,22 @@ function Chatbot() {
             displayedMessages.map((message) => (
               <div
                 key={message.key}
-                className={`chat-msg ${message.user_type === "user" ? "user" : "system"}${message.streaming ? " streaming" : ""
-                  }`}
+                className={`chat-msg ${message.user_type === "user" ? "user" : "system"}${message.streaming ? " streaming" : ""}`}
               >
                 <div className="chat-msg-label">
-                  {message.user_type === "user" ? "You" : "System"}
+                  {message.user_type === "user" ? "You" : "Assistant"}
                 </div>
                 <div className="chat-msg-content">
-                  {message.statement}
-                  {message.streaming ? <span className="stream-cursor">▍</span> : null}
+                  {message.pending ? (
+                    <span className="typing-dots">
+                      <span /><span /><span />
+                    </span>
+                  ) : (
+                    <>
+                      {message.statement}
+                      {message.streaming ? <span className="stream-cursor">▍</span> : null}
+                    </>
+                  )}
                 </div>
               </div>
             ))
@@ -489,24 +480,25 @@ function Chatbot() {
         <footer className="chatbot-input">
           <form onSubmit={(event) => void handleSend(event)}>
             <input
-              placeholder="Type your message..."
+              placeholder={
+                wsStatus === "failed" ? "Connection lost — refresh to reconnect" :
+                wsStatus !== "connected" ? "Connecting…" :
+                "Type your message…"
+              }
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              disabled={sending || creatingChat}
+              disabled={isStreaming || creatingChat || wsStatus !== "connected"}
             />
-            <button type="submit" disabled={!input.trim() || sending || creatingChat}>
-              Send
+            <button
+              type="submit"
+              disabled={!input.trim() || isStreaming || creatingChat || wsStatus !== "connected"}
+            >
+              {wsStatus === "connecting" || wsStatus === "disconnected" ? "Connecting…" : "Send"}
             </button>
           </form>
         </footer>
       </main>
 
-      <SystemMessageModal
-        open={systemModalOpen}
-        onClose={() => setSystemModalOpen(false)}
-        onSend={handleSystemSend}
-        sending={sendingSystem}
-      />
     </div>
   );
 }

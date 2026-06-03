@@ -85,6 +85,32 @@
     cursor: not-allowed;
 }
 
+.upload-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.upload-progress-track {
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(148, 163, 184, 0.15);
+    overflow: hidden;
+}
+
+.upload-progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #2563eb, #60a5fa);
+    transition: width 0.12s ease;
+}
+
+.upload-progress-label {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    text-align: right;
+}
+
 .upload-message {
     margin: 0;
     color: #93c5fd;
@@ -105,10 +131,25 @@
 
 .file-row {
     display: grid;
-    grid-template-columns: 1fr auto auto auto;
+    grid-template-columns: 1fr auto auto auto auto;
     gap: 8px;
     align-items: center;
 }
+
+.ingestion-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.badge-queued    { background: rgba(100,116,139,0.25); color: #94a3b8; }
+.badge-processing{ background: rgba(37,99,235,0.2);   color: #93c5fd; }
+.badge-complete  { background: rgba(22,163,74,0.2);   color: #86efac; }
+.badge-retrying  { background: rgba(234,88,12,0.2);   color: #fdba74; }
+.badge-failed    { background: rgba(220,38,38,0.2);   color: #fca5a5; }
 
 .file-row a {
     color: #93c5fd;
@@ -165,7 +206,8 @@
 
 @media (max-width: 640px) {
     .file-row {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
         gap: 6px;
         padding-bottom: 8px;
         border-bottom: 1px solid rgba(148, 163, 184, 0.15);

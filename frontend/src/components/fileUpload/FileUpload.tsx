@@ -12,6 +12,26 @@ import {
 import FilePreview from "./FilePreview";
 import "./FileUpload.css";
 
+const StatusBadge = ({ status }: { status: string | null }) => {
+  let label: string;
+  let cls: string;
+
+  if (!status || status === "QUEUED") {
+    label = "Queued"; cls = "badge-queued";
+  } else if (status.startsWith("STAGE_")) {
+    const n = status.split("_")[1];
+    label = `Processing ${n}/6`; cls = "badge-processing";
+  } else if (status === "COMPLETE") {
+    label = "Ready"; cls = "badge-complete";
+  } else if (status === "FAILED_RETRYABLE") {
+    label = "Retrying"; cls = "badge-retrying";
+  } else {
+    label = "Failed"; cls = "badge-failed";
+  }
+
+  return <span className={`ingestion-badge ${cls}`}>{label}</span>;
+}
+
 type FileUploadProps = {
   variant?: "embedded" | "modal";
   onClose?: () => void;
@@ -32,6 +52,7 @@ function FileUpload({
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const uploadInFlightRef = useRef(false);
 
@@ -39,6 +60,18 @@ function FileUpload({
     const fileList = await getFiles();
     setFiles(fileList);
   };
+
+  const isTerminal = (status: string | null) =>
+    status === "COMPLETE" || status === "FAILED_PERMANENT" || status == null;
+
+  const hasPending = files.some((f) => !isTerminal(f.ingestion_status));
+
+  // Poll every 3 s while any file is still being ingested, then stop.
+  useEffect(() => {
+    if (!showFileList || !hasPending) return;
+    const id = setInterval(() => void loadFiles(), 3000);
+    return () => clearInterval(id);
+  }, [showFileList, hasPending]);
 
   useEffect(() => {
     if (showFileList) {
@@ -76,12 +109,13 @@ function FileUpload({
 
     uploadInFlightRef.current = true;
     setUploading(true);
+    setUploadProgress(0);
     setMessage("");
 
     let uploaded = false;
 
     try {
-      await uploadFile(selectedFile, description);
+      await uploadFile(selectedFile, description, setUploadProgress);
       uploaded = true;
       setMessage("File uploaded successfully.");
       setSelectedFile(null);
@@ -91,6 +125,7 @@ function FileUpload({
     } finally {
       uploadInFlightRef.current = false;
       setUploading(false);
+      setUploadProgress(null);
     }
 
     if (!uploaded) return;
@@ -164,6 +199,18 @@ function FileUpload({
         {uploading ? "Uploading..." : "Upload"}
       </button>
 
+      {uploadProgress !== null && (
+        <div className="upload-progress">
+          <div className="upload-progress-track">
+            <div
+              className="upload-progress-fill"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+          <span className="upload-progress-label">{uploadProgress}%</span>
+        </div>
+      )}
+
       {message && <p className="upload-message">{message}</p>}
 
       {showFileList && (
@@ -182,7 +229,7 @@ function FileUpload({
                   {file.filename}
                 </a>
                 <span>{Math.round(file.filesize / 1024)} KB</span>
-
+                <StatusBadge status={file.ingestion_status} />
                 <button
                   type="button"
                   onClick={() => void handleDelete(file.id)}

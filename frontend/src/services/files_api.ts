@@ -9,26 +9,26 @@ export type FileRecord = {
   filesize: number;
   description: string | null;
   is_active: boolean;
+  ingestion_status: string | null;
 };
 
 export async function uploadFile(
   file: File,
-  description: string
+  description: string,
+  onProgress?: (pct: number) => void,
 ) {
   const form = new FormData();
-
   form.append("file", file);
   form.append("description", description);
 
-  const response = await api.post<FileRecord>(
-    "/files/upload",
-    form,
-    {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    }
-  );
+  const response = await api.post<FileRecord>("/files/upload", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+    onUploadProgress: (event) => {
+      if (onProgress && event.total) {
+        onProgress(Math.round((event.loaded * 100) / event.total));
+      }
+    },
+  });
 
   return response.data;
 }

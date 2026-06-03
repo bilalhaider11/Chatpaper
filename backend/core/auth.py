@@ -32,6 +32,12 @@ async def _get_cached_user(user_id: int) -> User | None:
     user.role = data["role"]
     user.is_active = data["is_active"]
     user.auth_provider = data["auth_provider"]
+    from datetime import datetime
+    # Old cache entries lack these fields; fall through to DB to rebuild them.
+    if not data.get("created_at") or not data.get("updated_at"):
+        return None
+    user.created_at = datetime.fromisoformat(data["created_at"])
+    user.updated_at = datetime.fromisoformat(data["updated_at"])
     return user
 
 
@@ -46,6 +52,8 @@ async def _cache_user(user: User) -> None:
         "role": user.role.value if hasattr(user.role, "value") else user.role,
         "is_active": user.is_active,
         "auth_provider": user.auth_provider,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None,
     }
     await redis.set(f"user:cache:{user.id}", json.dumps(data), ex=_USER_CACHE_TTL)
 
