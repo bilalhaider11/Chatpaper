@@ -1,9 +1,11 @@
 import "./Chatbot.css";
+import logo from "../../assets/logo.png";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
 import FileUpload from "../../components/fileUpload/FileUpload";
 import { DeleteIcon, EditIcon, ErrorIcon } from "../../components/icons/ActionIcons";
+import { LogoutIcon } from "../../components/icons/Icons";
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
 import { FileRecord, getFiles } from "../../services/files_api";
 import {
@@ -21,7 +23,7 @@ import {
 
 const PROCESSING_KEY = "chatpaper_processing_file";
 
-function Chatbot() {
+function Chatbot({ onLogout }: { onLogout: () => void }) {
   const { conversationId: urlId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -130,7 +132,8 @@ function Chatbot() {
   useEffect(() => {
     const init = async () => {
       if (!tokenStore.getToken()) {
-        navigate("/login", { replace: true });
+        tokenStore.clear();
+        onLogout();
         return;
       }
       try {
@@ -174,13 +177,13 @@ function Chatbot() {
         }
       } catch {
         tokenStore.clear();
-        navigate("/login", { replace: true });
+        onLogout();
       } finally {
         setLoading(false);
       }
     };
     void init();
-  }, [navigate]);
+  }, []);
 
   // Phase 2 — runs when URL param or init-loading state changes
   // Validates the conversation and loads its messages; redirects on 404 / wrong user.
@@ -358,7 +361,7 @@ function Chatbot() {
   // System messages still use HTTP (no streaming pattern needed)
   const logout = () => {
     tokenStore.clear();
-    navigate("/login", { replace: true });
+    onLogout();
   };
 
   const handleDelete = async (id: number) => {
@@ -419,6 +422,10 @@ function Chatbot() {
   return (
     <div className="chatbot-page">
       <aside className="chatbot-sidebar">
+        <Link to="/" className="sidebar-brand">
+          <img src={logo} alt="" className="sidebar-icon" />
+          <span className="sidebar-brand-name">Chatpaper</span>
+        </Link>
         <div className="sidebar-top">
           <button
             type="button"
@@ -434,7 +441,7 @@ function Chatbot() {
 
         <nav className="conversation-list">
           {conversations.length === 0 ? (
-            <p className="sidebar-empty">No conversations yet. Start a new chat.</p>
+            <p className="sidebar-empty">No conversations yet. Upload a document to begin.</p>
           ) : (
             conversations.map((conversation) => (
               <div
@@ -458,9 +465,10 @@ function Chatbot() {
                       autoFocus
                       className="edit-input"
                     />
-                    <button type="submit">Save</button>
+                    <button type="submit" className="edit-form-save">Save</button>
                     <button
                       type="button"
+                      className="edit-form-cancel"
                       onClick={(e) => {
                         e.stopPropagation();
                         setEditingId(0);
@@ -471,6 +479,9 @@ function Chatbot() {
                   </form>
                 ) : (
                   <>
+                    <span className="conversation-icon">
+                      {conversation.file_id ? "📄" : "🌐"}
+                    </span>
                     <span className="conversation-title">
                       {conversation.conversation_title || "New chat"}
                     </span>
@@ -484,7 +495,7 @@ function Chatbot() {
                           handleStartEdit(conversation);
                         }}
                       >
-                        <EditIcon />
+                        <EditIcon width={14} height={14} />
                       </button>
                       <button
                         type="button"
@@ -495,7 +506,7 @@ function Chatbot() {
                           void handleDelete(conversation.id);
                         }}
                       >
-                        <DeleteIcon />
+                        <DeleteIcon width={14} height={14} />
                       </button>
                     </div>
                   </>
@@ -506,10 +517,8 @@ function Chatbot() {
         </nav>
 
         <div className="sidebar-footer">
-          <Link to="/" className="sidebar-link">
-            Home
-          </Link>
           <button type="button" className="sidebar-logout" onClick={logout}>
+            <LogoutIcon width={15} height={15} />
             Logout
           </button>
         </div>
@@ -604,8 +613,8 @@ function Chatbot() {
             </div>
           ) : !selectedConversationId && displayedMessages.length === 0 ? (
             <div className="chatbot-empty-state">
-              <h2>How can I help you today?</h2>
-              <p>Start a new chat or select a conversation from the sidebar.</p>
+              <h2>Chat with your documents</h2>
+              <p>Upload a document to start asking questions, or pick a conversation from the sidebar.</p>
               <button
                 type="button"
                 className="start-chat-btn"
@@ -617,7 +626,7 @@ function Chatbot() {
             </div>
           ) : displayedMessages.length === 0 ? (
             <div className="chatbot-empty-state compact">
-              <p>Send a message to begin this conversation.</p>
+              <p>Ask anything about your document to get started.</p>
             </div>
           ) : (
             displayedMessages.map((message) => (
@@ -628,7 +637,7 @@ function Chatbot() {
                 <div className="chat-msg-label">
                   {message.user_type === "user" ? "You" : "Assistant"}
                 </div>
-                <div className="chat-msg-content">
+                <div className="chat-msg-content" style={{ whiteSpace: "pre-wrap" }}>
                   {message.pending ? (
                     <span className="typing-dots">
                       <span /><span /><span />

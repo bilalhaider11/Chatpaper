@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useDropzone } from "react-dropzone";
+import logo from "../../assets/logo.png";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
-import { ACCEPTED_FILE_TYPES } from "../../services/file_config";
-import { FileRecord, getApiErrorMessage, getFiles, uploadFile } from "../../services/files_api";
+import { FileRecord, getFiles } from "../../services/files_api";
+import FileUpload from "../../components/fileUpload/FileUpload";
+import { LogoutIcon } from "../../components/icons/Icons";
 import "./Home.css";
 
 type HomeProps = {
@@ -12,8 +13,6 @@ type HomeProps = {
 
 type Panel =
   | { kind: "loading" }
-  | { kind: "upload" }
-  | { kind: "progress"; filename: string; percent: number }
   | { kind: "tracking"; file: FileRecord }
   | { kind: "files" };
 
@@ -26,84 +25,6 @@ function StatusBadge({ status }: { status: string | null }) {
   if (status === "COMPLETE") return <span className="hp-badge hp-badge-complete">Ready</span>;
   if (status === "FAILED_RETRYABLE") return <span className="hp-badge hp-badge-retrying">Retrying</span>;
   return <span className="hp-badge hp-badge-failed">Failed</span>;
-}
-
-function UploadPanel({ onUploaded }: { onUploaded: (file: FileRecord) => void }) {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState<number | null>(null);
-  const [error, setError] = useState("");
-  const inFlightRef = useRef(false);
-
-  const onDrop = useCallback((accepted: File[]) => {
-    setSelectedFile(accepted[0] ?? null);
-    setError("");
-  }, []);
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    multiple: false,
-    accept: ACCEPTED_FILE_TYPES,
-  });
-
-  const handleUpload = async () => {
-    if (!selectedFile || inFlightRef.current) return;
-    inFlightRef.current = true;
-    setUploading(true);
-    setProgress(0);
-    setError("");
-    try {
-      const record = await uploadFile(selectedFile, setProgress);
-      onUploaded(record);
-    } catch (err) {
-      setError(getApiErrorMessage(err, "Upload failed. Please try again."));
-      setUploading(false);
-      setProgress(null);
-      inFlightRef.current = false;
-    }
-  };
-
-  if (uploading) {
-    return (
-      <div className="upload-card">
-        <h2 className="upload-card-title">Uploading…</h2>
-        <p className="upload-card-subtitle">{selectedFile?.name}</p>
-        <div className="upload-progress">
-          <div className="upload-progress-track">
-            <div className="upload-progress-fill" style={{ width: `${progress ?? 0}%` }} />
-          </div>
-          <span className="upload-progress-label">{progress ?? 0}%</span>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="upload-card">
-      <h2 className="upload-card-title">Upload your file</h2>
-      <p className="upload-card-subtitle">Upload a document to start chatting with it.</p>
-
-      <div {...getRootProps()} className="dropzone">
-        <input {...getInputProps()} />
-        <p>{isDragActive ? "Drop the file here…" : "Drag & drop file here, or click to select"}</p>
-      </div>
-
-      {selectedFile && (
-        <p className="selected-file">Selected: <strong>{selectedFile.name}</strong></p>
-      )}
-
-      <button
-        type="button"
-        className="upload-submit-btn"
-        onClick={() => void handleUpload()}
-        disabled={!selectedFile}
-      >
-        Upload
-      </button>
-
-      {error && <p className="upload-message">{error}</p>}
-    </div>
-  );
 }
 
 function TrackingPanel({ file }: { file: FileRecord }) {
@@ -122,12 +43,8 @@ function TrackingPanel({ file }: { file: FileRecord }) {
         <p className="hp-tracking-hint">This may take a moment. You can start chatting once it's ready.</p>
       )}
       <div className="hp-tracking-actions">
-        <Link to="/chat" state={{ openUpload: false }} className="hp-tracking-link">
-          Open Chat
-        </Link>
-        <Link to="/files" className="hp-tracking-link hp-tracking-link-secondary">
-          My Files
-        </Link>
+        <Link to="/chat" className="hp-tracking-link">Open Chat</Link>
+        <Link to="/files" className="hp-tracking-link hp-tracking-link-secondary">My Files</Link>
       </div>
     </div>
   );
@@ -140,9 +57,7 @@ function FilesPanel() {
       <p className="upload-card-subtitle">Manage your uploaded documents and start chatting.</p>
       <div className="hp-panel-actions">
         <Link to="/files" className="hp-panel-btn hp-panel-btn-primary">View My Files</Link>
-        <Link to="/chat" className="hp-panel-btn hp-panel-btn-secondary">
-          Open Chat
-        </Link>
+        <Link to="/chat" className="hp-panel-btn hp-panel-btn-secondary">Open Chat</Link>
       </div>
     </div>
   );
@@ -153,6 +68,7 @@ function Home({ onLogout }: HomeProps) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [panel, setPanel] = useState<Panel>({ kind: "loading" });
+  const [showUpload, setShowUpload] = useState(false);
 
   const isTerminal = (s: string | null) =>
     s === "COMPLETE" || s === "FAILED_PERMANENT";
@@ -164,9 +80,9 @@ function Home({ onLogout }: HomeProps) {
         return;
       }
       try {
-        const [currentUser, files] = await Promise.all([fetchCurrentUser(), getFiles()]);
+        const [currentUser] = await Promise.all([fetchCurrentUser(), getFiles()]);
         setUser(currentUser);
-        setPanel(files.length > 0 ? { kind: "files" } : { kind: "upload" });
+        setPanel({ kind: "files" });
       } catch {
         tokenStore.clear();
         onLogout();
@@ -203,8 +119,7 @@ function Home({ onLogout }: HomeProps) {
 
   const logout = () => {
     tokenStore.clear();
-    onLogout();
-    navigate("/login", { replace: true });
+    onLogout(); // sets isAuthenticated=false in App → route guard redirects to /login
   };
 
   if (loading) return <div className="home-page">Loading…</div>;
@@ -213,20 +128,6 @@ function Home({ onLogout }: HomeProps) {
     switch (panel.kind) {
       case "loading":
         return <div className="upload-card"><p className="upload-card-subtitle">Loading…</p></div>;
-      case "upload":
-        return <UploadPanel onUploaded={(file) => setPanel({ kind: "tracking", file })} />;
-      case "progress":
-        return (
-          <div className="upload-card">
-            <h2 className="upload-card-title">Uploading…</h2>
-            <div className="upload-progress">
-              <div className="upload-progress-track">
-                <div className="upload-progress-fill" style={{ width: `${panel.percent}%` }} />
-              </div>
-              <span className="upload-progress-label">{panel.percent}%</span>
-            </div>
-          </div>
-        );
       case "tracking":
         return <TrackingPanel file={panel.file} />;
       case "files":
@@ -236,35 +137,45 @@ function Home({ onLogout }: HomeProps) {
 
   return (
     <div className="home-page">
-      <div className="home-shell">
-        <div className="home-left">
-          <div className="home-topbar">
-            <div className="home-badge">File Processing Platform</div>
-            <div className="home-actions">
-              <Link to="/chat" state={{ openUpload: true }}>Open chatbot</Link>
-              <button onClick={logout}>Logout</button>
-            </div>
-          </div>
+      {showUpload && (
+        <FileUpload
+          variant="modal"
+          onClose={() => setShowUpload(false)}
+          onUploadSuccess={(file) => setPanel({ kind: "tracking", file })}
+        />
+      )}
 
+      <nav className="home-navbar">
+        <img src={logo} alt="Chatpaper" className="home-logo" />
+        <button type="button" className="home-nav-logout" onClick={logout}>
+          <LogoutIcon width={14} height={14} />
+          Logout
+        </button>
+      </nav>
+
+      <div className="home-content">
+        <div className="home-hero">
+          <div className="home-glow" />
+          <p className="home-greeting">Welcome back</p>
           <h1 className="home-title">
-            Welcome to <span>Celestial Technologies</span>
+            Hello, <span>{user?.email?.split("@")[0]}</span>
           </h1>
-          <p className="home-user">Logged in as: {user?.email}</p>
-
-          <p className="home-description">
-            We build secure and scalable digital solutions that help businesses
-            automate workflows, process files efficiently, and deliver reliable
-            modern user experiences.
+          <p className="home-subtitle">
+            Your documents are ready to chat. Ask questions, find answers, and surface insights, instantly.
           </p>
-
-          <ul className="home-highlights">
-            <li>Secure file uploads with trusted workflows</li>
-            <li>Fast cloud-ready processing pipeline</li>
-            <li>Enterprise-grade architecture and support</li>
-          </ul>
+          <div className="home-ctas">
+            <Link to="/chat" className="home-cta-primary">Open Chat →</Link>
+            <button
+              type="button"
+              className="home-cta-secondary"
+              onClick={() => setShowUpload(true)}
+            >
+              Upload Document
+            </button>
+          </div>
         </div>
 
-        <div className="home-right">
+        <div className="home-panel">
           {renderPanel()}
         </div>
       </div>

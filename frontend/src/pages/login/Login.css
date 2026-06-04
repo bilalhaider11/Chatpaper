@@ -1,59 +1,211 @@
+/* ── Page ── */
 .login-page {
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px;
-    background: linear-gradient(135deg, #020617, #0f172a 55%, #1e293b);
+    background: #080d1a;
+    position: relative;
+    overflow: hidden;
 }
 
+/* Large glow — needs high opacity so it bleeds through the card backdrop-filter */
+.login-glow {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 960px;
+    height: 960px;
+    background: radial-gradient(
+        circle at center,
+        rgba(37, 99, 235, 0.45) 0%,
+        rgba(37, 99, 235, 0.18) 30%,
+        rgba(37, 99, 235, 0.05) 55%,
+        transparent 70%
+    );
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* ── Card entrance animation ── */
+@keyframes login-slide-up {
+    from {
+        opacity: 0;
+        transform: translateY(20px) scale(0.99);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* ── Card ── */
 .login-card {
+    position: relative;
+    z-index: 1;
     width: min(420px, 100%);
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 28px;
-    border-radius: 16px;
-    border: 1px solid rgba(148, 163, 184, 0.25);
-    background: rgba(15, 23, 42, 0.82);
+    gap: 16px;
+    padding: 32px;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    /* Lowered opacity so glow bleeds through backdrop-filter */
+    background: rgba(10, 14, 26, 0.60);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow:
+        0 0 0 1px rgba(37, 99, 235, 0.1),
+        0 24px 64px rgba(0, 0, 0, 0.5),
+        0 4px 16px rgba(0, 0, 0, 0.25);
+    animation: login-slide-up 0.35s ease-out both;
 }
 
-.login-card h1 {
-    margin: 0;
-    color: #f8fafc;
+/* ── Brand ── */
+.login-brand {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
 }
 
-.login-card p {
-    margin: 0 0 4px;
-    color: #cbd5e1;
+.login-logo {
+    width: 50px;
+    height: auto;
+    object-fit: contain;
 }
 
-.login-card input {
-    border: 1px solid rgba(148, 163, 184, 0.3);
-    border-radius: 10px;
-    padding: 10px 12px;
-    background: #0b1325;
-    color: #e2e8f0;
-}
-
-.login-card button {
-    margin-top: 4px;
-    border: 0;
-    border-radius: 10px;
-    padding: 11px 12px;
+.login-brand-name {
+    font-size: 0.88rem;
     font-weight: 600;
-    color: #fff;
-    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #60a5fa;
+    letter-spacing: 0.04em;
+}
+
+/* ── Mode tabs ── */
+.login-tabs {
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 11px;
+}
+
+.login-tab {
+    flex: 1;
+    padding: 9px 12px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    /* Readable inactive color */
+    color: #94a3b8;
+    font-size: 0.875rem;
+    font-weight: 500;
     cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
 }
 
-.login-card button:disabled {
-    opacity: 0.75;
-    cursor: wait;
+.login-tab:hover:not(:disabled) {
+    color: #cbd5e1;
+    background: rgba(255, 255, 255, 0.05);
 }
 
+.login-tab.login-tab-active {
+    background: rgba(37, 99, 235, 0.2);
+    border-color: rgba(96, 165, 250, 0.25);
+    color: #bfdbfe;
+}
+
+.login-tab:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+/* ── Subtitle ── */
+.login-subtitle {
+    margin: 0;
+    color: #94a3b8;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+/* ── Fields ── */
+.login-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.login-input {
+    width: 100%;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 11px 14px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #e2e8f0;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+    box-sizing: border-box;
+}
+
+.login-input::placeholder {
+    color: #64748b;
+}
+
+.login-input:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.login-input:focus {
+    border-color: rgba(96, 165, 250, 0.6);
+    background: rgba(255, 255, 255, 0.07);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+/* ── Error ── */
 .login-error {
     margin: 0;
-    color: #fca5a5 !important;
-    font-size: 0.9rem;
+    padding: 10px 13px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    border-radius: 8px;
+    color: #fca5a5;
+    font-size: 0.84rem;
+    line-height: 1.4;
+}
+
+/* ── Submit button ── */
+.login-submit-btn {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(to right, #3b82f6, #2563eb);
+    color: #fff;
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+    letter-spacing: 0.01em;
+}
+
+.login-submit-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 24px rgba(59, 130, 246, 0.45);
+}
+
+.login-submit-btn:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+.login-submit-btn:disabled {
+    opacity: 0.65;
+    cursor: wait;
 }

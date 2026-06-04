@@ -11,6 +11,8 @@ function App() {
     Boolean(tokenStore.getToken())
   );
 
+  const handleLogout = () => setIsAuthenticated(false);
+
   return (
     <Routes>
       <Route
@@ -25,19 +27,19 @@ function App() {
       />
       <Route
         path="/"
-        element={<Home onLogout={() => setIsAuthenticated(false)} />}
+        element={isAuthenticated ? <Home onLogout={handleLogout} /> : <Navigate to="/login" replace />}
       />
       <Route
         path="/chat"
-        element={isAuthenticated ? <Chatbot /> : <Navigate to="/login" replace />}
+        element={isAuthenticated ? <Chatbot onLogout={handleLogout} /> : <Navigate to="/login" replace />}
       />
       <Route
         path="/chat/:conversationId"
-        element={isAuthenticated ? <Chatbot /> : <Navigate to="/login" replace />}
+        element={isAuthenticated ? <Chatbot onLogout={handleLogout} /> : <Navigate to="/login" replace />}
       />
       <Route
         path="/files"
-        element={isAuthenticated ? <Files /> : <Navigate to="/login" replace />}
+        element={isAuthenticated ? <Files onLogout={handleLogout} /> : <Navigate to="/login" replace />}
       />
       <Route
         path="*"

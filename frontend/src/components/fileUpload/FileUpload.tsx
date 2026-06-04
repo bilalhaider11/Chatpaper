@@ -10,6 +10,7 @@ import {
   getFiles,
   uploadFile,
 } from "../../services/files_api";
+import { CloudUploadIcon, FileIcon, UploadIcon } from "../icons/Icons";
 import FilePreview from "./FilePreview";
 import "./FileUpload.css";
 
@@ -31,6 +32,14 @@ const StatusBadge = ({ status }: { status: string | null }) => {
   }
 
   return <span className={`ingestion-badge ${cls}`}>{label}</span>;
+};
+
+function fileTypeIcon(filename: string) {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "pdf") return "ftype-pdf";
+  if (ext === "docx" || ext === "doc") return "ftype-docx";
+  if (ext === "xlsx" || ext === "xls" || ext === "csv") return "ftype-xlsx";
+  return "ftype-default";
 }
 
 type FileUploadProps = {
@@ -46,7 +55,7 @@ function FileUpload({
   onClose,
   onUploadSuccess,
   showFileList = false,
-  subtitle = "Choose a document to start secure processing.",
+  subtitle = "Upload a document to start chatting with it.",
 }: FileUploadProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -54,6 +63,8 @@ function FileUpload({
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [message, setMessage] = useState("");
+  const [rejectMsg, setRejectMsg] = useState("");
+  const rejectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const uploadInFlightRef = useRef(false);
 
   const loadFiles = async () => {
@@ -66,7 +77,6 @@ function FileUpload({
 
   const hasPending = files.some((f) => !isTerminal(f.ingestion_status));
 
-  // Poll every 3 s while any file is still being ingested, then stop.
   useEffect(() => {
     if (!showFileList || !hasPending) return;
     const id = setInterval(() => void loadFiles(), 3000);
@@ -74,35 +84,50 @@ function FileUpload({
   }, [showFileList, hasPending]);
 
   useEffect(() => {
-    if (showFileList) {
-      void loadFiles();
-    }
+    if (showFileList) void loadFiles();
   }, [showFileList]);
 
+  // Escape key closes modal
   useEffect(() => {
-    if (!selectedFile) {
-      setPreviewUrl(null);
-      return;
-    }
-
-    const objectUrl = URL.createObjectURL(selectedFile);
-    setPreviewUrl(objectUrl);
-
-    return () => {
-      URL.revokeObjectURL(objectUrl);
+    if (variant !== "modal") return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose?.();
     };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [variant, onClose]);
+
+  useEffect(() => {
+    if (!selectedFile) { setPreviewUrl(null); return; }
+    const url = URL.createObjectURL(selectedFile);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
   }, [selectedFile]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setSelectedFile(acceptedFiles[0] ?? null);
     setMessage("");
+    setRejectMsg("");
+  }, []);
+
+  const onDropRejected = useCallback(() => {
+    if (rejectTimerRef.current) clearTimeout(rejectTimerRef.current);
+    setRejectMsg("Unsupported file type. Use PDF, DOCX, TXT, CSV, or XLSX.");
+    rejectTimerRef.current = setTimeout(() => setRejectMsg(""), 3500);
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected,
     multiple: false,
     accept: ACCEPTED_FILE_TYPES,
   });
+
+  const clearSelection = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedFile(null);
+    setMessage("");
+  };
 
   const handleUpload = async () => {
     if (!selectedFile || uploadInFlightRef.current) return;
@@ -128,19 +153,13 @@ function FileUpload({
 
     if (!record) return;
 
-    if (showFileList) {
-      void loadFiles();
-    }
+    if (showFileList) void loadFiles();
 
     try {
       await onUploadSuccess?.(record);
-      if (variant === "modal") {
-        onClose?.();
-      }
+      if (variant === "modal") onClose?.();
     } catch (err) {
       setMessage(getApiErrorMessage(err, "Failed to upload file."));
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -151,54 +170,71 @@ function FileUpload({
 
   const card = (
     <div className="upload-card">
-      <h2 className="upload-card-title">Upload your file</h2>
-
-      <p className="upload-card-subtitle">{subtitle}</p>
-
-      <div {...getRootProps()} className="dropzone">
-        <input {...getInputProps()} />
-
-        {isDragActive ? (
-          <p>Drop the file here...</p>
-        ) : (
-          <p>Drag & drop file here, or click to select</p>
+      <div className="upload-card-header">
+        <div>
+          <h2 className="upload-card-title">Upload a document</h2>
+          <p className="upload-card-subtitle">{subtitle}</p>
+        </div>
+        {variant === "modal" && onClose && (
+          <button type="button" className="upload-modal-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
         )}
       </div>
 
-      {selectedFile && (
-        <p className="selected-file">
-          Selected: <strong>{selectedFile.name}</strong>
-        </p>
+      <div
+        {...getRootProps()}
+        className={`dropzone${isDragActive ? " dropzone-active" : ""}${selectedFile ? " dropzone-has-file" : ""}`}
+      >
+        <input {...getInputProps()} />
+
+        {selectedFile ? (
+          <div className="dropzone-file-selected">
+            <FileIcon className={`dropzone-file-icon ${fileTypeIcon(selectedFile.name)}`} strokeWidth={1.5} />
+            <span className="dropzone-filename">{selectedFile.name}</span>
+            <span className="dropzone-filesize">{(selectedFile.size / 1024).toFixed(0)} KB</span>
+            <button type="button" className="dropzone-clear" onClick={clearSelection} aria-label="Remove file">×</button>
+          </div>
+        ) : (
+          <>
+            <CloudUploadIcon className="dropzone-upload-icon" strokeWidth={1.5} />
+            <p className="dropzone-text">{isDragActive ? "Drop it here…" : "Drag & drop your document"}</p>
+            <p className="dropzone-hint">or click to browse</p>
+          </>
+        )}
+      </div>
+
+      {previewUrl && selectedFile && (
+        <div className="upload-preview-wrap">
+          <FilePreview fileUrl={previewUrl} fileType={selectedFile.type} fileName={selectedFile.name} />
+        </div>
       )}
 
-      {previewUrl && selectedFile ? (
-        <FilePreview
-          fileUrl={previewUrl}
-          fileType={selectedFile.type}
-          fileName={selectedFile.name}
-        />
-      ) : null}
+      <div className="upload-format-chips">
+        {["PDF", "DOCX", "TXT", "CSV", "XLSX"].map((fmt) => (
+          <span key={fmt} className="upload-format-chip">{fmt}</span>
+        ))}
+      </div>
 
+      {rejectMsg && <p className="upload-message upload-message-error">{rejectMsg}</p>}
 
-      <button
-        type="button"
-        className="upload-submit-btn"
-        onClick={() => void handleUpload()}
-        disabled={!selectedFile || uploading}
-      >
-        {uploading ? "Uploading..." : "Upload"}
-      </button>
-
-      {uploadProgress !== null && (
-        <div className="upload-progress">
+      {uploading ? (
+        <div className="upload-progress-wrap">
           <div className="upload-progress-track">
-            <div
-              className="upload-progress-fill"
-              style={{ width: `${uploadProgress}%` }}
-            />
+            <div className="upload-progress-fill" style={{ width: `${uploadProgress ?? 0}%` }} />
           </div>
-          <span className="upload-progress-label">{uploadProgress}%</span>
+          <span className="upload-progress-label">{uploadProgress ?? 0}%</span>
         </div>
+      ) : (
+        <button
+          type="button"
+          className="upload-submit-btn"
+          onClick={() => void handleUpload()}
+          disabled={!selectedFile}
+        >
+          <UploadIcon width={14} height={14} />
+          Upload document
+        </button>
       )}
 
       {message && <p className="upload-message">{message}</p>}
@@ -220,10 +256,7 @@ function FileUpload({
                 </button>
                 <span>{Math.round(file.filesize / 1024)} KB</span>
                 <StatusBadge status={file.ingestion_status} />
-                <button
-                  type="button"
-                  onClick={() => void handleDelete(file.id)}
-                >
+                <button type="button" onClick={() => void handleDelete(file.id)}>
                   Delete
                 </button>
               </div>
@@ -237,10 +270,7 @@ function FileUpload({
   if (variant === "modal") {
     return (
       <div className="upload-modal-overlay" onClick={onClose}>
-        <div
-          className="upload-modal-panel"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className="upload-modal-panel" onClick={(e) => e.stopPropagation()}>
           {card}
         </div>
       </div>
