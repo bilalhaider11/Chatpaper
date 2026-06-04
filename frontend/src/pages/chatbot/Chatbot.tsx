@@ -3,9 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
 import FileUpload from "../../components/fileUpload/FileUpload";
-import { DeleteIcon, EditIcon } from "../../components/icons/ActionIcons";
+import { DeleteIcon, EditIcon, ErrorIcon } from "../../components/icons/ActionIcons";
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
-import { getFiles } from "../../services/files_api";
+import { FileRecord, getFiles } from "../../services/files_api";
 import {
   ChatWsEvent,
   Conversation,
@@ -18,6 +18,8 @@ import {
   getConversationList,
   normalizeUserType,
 } from "../../services/conversation_api";
+
+const PROCESSING_KEY = "chatpaper_processing_file";
 
 function Chatbot() {
   const { conversationId: urlId } = useParams<{ conversationId?: string }>();
@@ -35,11 +37,18 @@ function Chatbot() {
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
   // Ref mirrors selectedConversationId so the Loader can check without stale closure
   const selectedConvRef = useRef<number | null>(null);
+  // Stable ref holding the per-file conversation_id for the file currently being ingested.
+  // Lives in a ref (not state) so it's never stale inside the polling closure.
+  const processingConvIdRef = useRef<number | null>(null);
   const [hasUploadedFile, setHasUploadedFile] = useState(false);
+  const [processingFile, setProcessingFile] = useState<FileRecord | null>(null);
+  // File status for the currently selected per-file conversation
+  const [activeFileStatus, setActiveFileStatus] = useState<FileRecord | null>(null);
   const [messages, setMessages] = useState<Conversation[]>([]);
   const [liveMessages, setLiveMessages] = useState<LiveMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingChat, setCreatingChat] = useState(false);
+  const [wsError, setWsError] = useState<string | null>(null);
 
   const isStreaming = liveMessages.some((m) => m.streaming);
 
@@ -107,6 +116,7 @@ function Chatbot() {
       );
     } else if (event.type === "error") {
       setLiveMessages((prev) => prev.filter((m) => !m.streaming));
+      setWsError("Something went wrong — please try again.");
     }
   }, []);
 
@@ -128,12 +138,39 @@ function Chatbot() {
         setUser(currentUser);
         const list = await getConversationList();
         setConversations(list);
-        if (list.length > 0) {
-          setHasUploadedFile(true);
-        } else {
-          const files = await getFiles();
-          setHasUploadedFile(files.length > 0);
-          setisopen(true);
+
+        // Restore in-progress or failed upload state across reloads
+        const savedJson = sessionStorage.getItem(PROCESSING_KEY);
+        let restoredFromStorage = false;
+        if (savedJson) {
+          try {
+            const saved = JSON.parse(savedJson) as FileRecord;
+            const files = await getFiles();
+            const current = files.find((f) => f.id === saved.id);
+            if (current && current.ingestion_status !== "COMPLETE") {
+              // Restore conversation_id from the saved upload response
+              processingConvIdRef.current = saved.conversation_id ?? null;
+              setProcessingFile(current);
+              // Persist with conversation_id so future reloads can also recover it
+              sessionStorage.setItem(PROCESSING_KEY, JSON.stringify({ ...current, conversation_id: processingConvIdRef.current }));
+              setHasUploadedFile(true);
+              restoredFromStorage = true;
+            } else {
+              sessionStorage.removeItem(PROCESSING_KEY);
+            }
+          } catch {
+            sessionStorage.removeItem(PROCESSING_KEY);
+          }
+        }
+
+        if (!restoredFromStorage) {
+          if (list.length > 0) {
+            setHasUploadedFile(true);
+          } else {
+            const files = await getFiles();
+            setHasUploadedFile(files.length > 0);
+            setisopen(true);
+          }
         }
       } catch {
         tokenStore.clear();
@@ -165,12 +202,12 @@ function Chatbot() {
           const data = await getConversation(parsedId);
           setMessages(data);
           setLiveMessages([]);
+          setWsError(null);
         } catch {
           // conv not found or belongs to another user
           navigate("/chat", { replace: true });
         }
-      } else if (conversations.length > 0) {
-        // No ID in URL — redirect to first conversation
+      } else if (conversations.length > 0 && !processingFile && !processingConvIdRef.current) {
         navigate(`/chat/${conversations[0].id}`, { replace: true });
       }
       // No URL ID and no conversations: stay at /chat, upload modal is open
@@ -181,11 +218,86 @@ function Chatbot() {
     // only in the "no URL ID" branch which fires on the same render batch as
     // init (when loading flips to false), so it is never stale in that path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlId, loading, navigate]);
+  }, [urlId, loading, navigate, processingFile]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [displayedMessages]);
+
+  const isFileTerminal = (s: string | null) =>
+    s === "COMPLETE" || s === "FAILED_PERMANENT";
+
+  // When the selected conversation changes, check if its file is ready to chat
+  useEffect(() => {
+    if (!selectedConversationId) { setActiveFileStatus(null); return; }
+    const conv = conversations.find((c) => c.id === selectedConversationId);
+    if (!conv?.file_id) { setActiveFileStatus(null); return; }
+    const check = async () => {
+      try {
+        const files = await getFiles();
+        const file = files.find((f) => f.id === conv.file_id);
+        setActiveFileStatus(file && file.ingestion_status !== "COMPLETE" ? file : null);
+      } catch { /* ignore */ }
+    };
+    void check();
+    // conversations read inside but not a dep — it's always current when selectedConversationId changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedConversationId]);
+
+  // Poll the active conversation's file status until it reaches a terminal state
+  useEffect(() => {
+    if (!activeFileStatus || isFileTerminal(activeFileStatus.ingestion_status)) return;
+    const id = setInterval(async () => {
+      try {
+        const files = await getFiles();
+        const updated = files.find((f) => f.id === activeFileStatus.id);
+        if (!updated) { setActiveFileStatus(null); return; }
+        setActiveFileStatus(updated.ingestion_status === "COMPLETE" ? null : updated);
+      } catch { /* ignore */ }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [activeFileStatus]);
+
+  // Poll ingestion status after upload; navigate to the per-file conv when ready
+  useEffect(() => {
+    if (!processingFile || isFileTerminal(processingFile.ingestion_status)) return;
+    const id = setInterval(async () => {
+      try {
+        const files = await getFiles();
+        const updated = files.find((f) => f.id === processingFile.id);
+        if (!updated) {
+          // File was deleted
+          processingConvIdRef.current = null;
+          setProcessingFile(null);
+          sessionStorage.removeItem(PROCESSING_KEY);
+          return;
+        }
+        if (updated.ingestion_status === "COMPLETE") {
+          const convId = processingConvIdRef.current;
+          // Keep ref non-null until after navigate so Phase 2 doesn't redirect to
+          // conversations[0] in the gap between setProcessingFile(null) and navigate.
+          setProcessingFile(null);
+          sessionStorage.removeItem(PROCESSING_KEY);
+          await loadConversationList();
+          navigate(convId ? `/chat/${convId}` : "/chat");
+          processingConvIdRef.current = null;
+          return;
+        }
+        if (updated.ingestion_status === "FAILED_PERMANENT") {
+          // Keep the card visible showing the error; stop polling by updating status
+          setProcessingFile(updated);
+          sessionStorage.setItem(PROCESSING_KEY, JSON.stringify({ ...updated, conversation_id: processingConvIdRef.current }));
+          return;
+        }
+        // Still processing — update badge stage (preserve conversation_id in storage)
+        setProcessingFile(updated);
+        sessionStorage.setItem(PROCESSING_KEY, JSON.stringify({ ...updated, conversation_id: processingConvIdRef.current }));
+      } catch {
+        // ignore transient poll errors
+      }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [processingFile, navigate]);
 
   // Selecting a conversation = update the URL; the Loader handles the rest
   const handleSelectConversation = (conversationListId: number) => {
@@ -198,6 +310,7 @@ function Chatbot() {
 
   const handleSend = async (event?: { preventDefault(): void }) => {
     event?.preventDefault();
+    setWsError(null);
     const text = input.trim();
     if (!text || isStreaming || creatingChat) return;
 
@@ -271,18 +384,12 @@ function Chatbot() {
     setEditTitle(conversation.conversation_title || "New chat");
   };
 
-  const handleUploadSuccess = async () => {
-    try {
-      setHasUploadedFile(true);
-      const list = await loadConversationList();
-      if (list.length > 0) {
-        setisopen(false);
-        navigate(`/chat/${list[0].id}`);
-      }
-    } catch (error) {
-      console.error("Failed to start chat after upload:", error);
-      throw error;
-    }
+  const handleUploadSuccess = async (file: FileRecord) => {
+    setHasUploadedFile(true);
+    setisopen(false);
+    const convId = file.conversation_id ?? null;
+    await loadConversationList();
+    if (convId) navigate(`/chat/${convId}`);
   };
 
   const handleSaveEdit = async (e: { preventDefault(): void }, id: number) => {
@@ -433,7 +540,69 @@ function Chatbot() {
               subtitle="Upload a document to use with this chat session."
             />
           ) : null}
-          {!selectedConversationId && displayedMessages.length === 0 ? (
+          {processingFile && !selectedConversationId ? (
+            <div className="chatbot-empty-state">
+              <div className={`file-processing-card${processingFile.ingestion_status === "FAILED_PERMANENT" ? " file-processing-card--failed" : ""}`}>
+                <p className="file-processing-name" title={processingFile.filename}>
+                  {processingFile.filename}
+                </p>
+                <span className={`file-processing-badge${processingFile.ingestion_status === "FAILED_PERMANENT" ? " file-processing-badge--failed" : ""}`}>
+                  {processingFile.ingestion_status === "FAILED_PERMANENT"
+                    ? "Ingestion Failed"
+                    : processingFile.ingestion_status?.startsWith("STAGE_")
+                    ? `Processing ${processingFile.ingestion_status.split("_")[1]}/6…`
+                    : "Processing…"}
+                </span>
+                <p className="file-processing-hint">
+                  {processingFile.ingestion_status === "FAILED_PERMANENT"
+                    ? "This file could not be processed. Delete it from My Files and try uploading again."
+                    : "Your file is being ingested. Chat will open automatically when it’s ready."}
+                </p>
+                {processingFile.ingestion_status === "FAILED_PERMANENT" && (
+                  <button
+                    type="button"
+                    className="file-processing-dismiss"
+                    onClick={() => {
+                      processingConvIdRef.current = null;
+                      setProcessingFile(null);
+                      sessionStorage.removeItem(PROCESSING_KEY);
+                    }}
+                  >
+                    Dismiss
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : activeFileStatus ? (
+            <div className="chatbot-empty-state">
+              <div className={`file-processing-card${activeFileStatus.ingestion_status === "FAILED_PERMANENT" ? " file-processing-card--failed" : ""}`}>
+                <p className="file-processing-name" title={activeFileStatus.filename}>
+                  {activeFileStatus.filename}
+                </p>
+                <span className={`file-processing-badge${activeFileStatus.ingestion_status === "FAILED_PERMANENT" ? " file-processing-badge--failed" : ""}`}>
+                  {activeFileStatus.ingestion_status === "FAILED_PERMANENT"
+                    ? "Ingestion Failed"
+                    : activeFileStatus.ingestion_status?.startsWith("STAGE_")
+                    ? `Processing ${activeFileStatus.ingestion_status.split("_")[1]}/6…`
+                    : "Processing…"}
+                </span>
+                <p className="file-processing-hint">
+                  {activeFileStatus.ingestion_status === "FAILED_PERMANENT"
+                    ? "This file could not be processed. Delete it from My Files and try uploading again."
+                    : "This file is still being processed. Chat will be available when it’s ready."}
+                </p>
+                {activeFileStatus.ingestion_status === "FAILED_PERMANENT" && (
+                  <button
+                    type="button"
+                    className="file-processing-dismiss"
+                    onClick={() => setActiveFileStatus(null)}
+                  >
+                    Dismiss
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : !selectedConversationId && displayedMessages.length === 0 ? (
             <div className="chatbot-empty-state">
               <h2>How can I help you today?</h2>
               <p>Start a new chat or select a conversation from the sidebar.</p>
@@ -474,6 +643,12 @@ function Chatbot() {
               </div>
             ))
           )}
+          {wsError && (
+            <div className="ws-error-banner">
+              <ErrorIcon className="ws-error-icon" />
+              {wsError}
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </section>
 
@@ -481,17 +656,18 @@ function Chatbot() {
           <form onSubmit={(event) => void handleSend(event)}>
             <input
               placeholder={
+                processingFile || activeFileStatus ? "Waiting for file to finish processing…" :
                 wsStatus === "failed" ? "Connection lost — refresh to reconnect" :
                 wsStatus !== "connected" ? "Connecting…" :
                 "Type your message…"
               }
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              disabled={isStreaming || creatingChat || wsStatus !== "connected"}
+              disabled={!!processingFile || !!activeFileStatus || isStreaming || creatingChat || wsStatus !== "connected"}
             />
             <button
               type="submit"
-              disabled={!input.trim() || isStreaming || creatingChat || wsStatus !== "connected"}
+              disabled={!!processingFile || !!activeFileStatus || !input.trim() || isStreaming || creatingChat || wsStatus !== "connected"}
             >
               {wsStatus === "connecting" || wsStatus === "disconnected" ? "Connecting…" : "Send"}
             </button>

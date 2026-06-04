@@ -126,6 +126,7 @@ async def _bm25_retrieve(
         FROM document_parents dp
         JOIN files_data fd ON dp.file_id = fd.id
         WHERE fd.user_id = :user_id
+          AND fd."is_Active" = TRUE
           AND to_tsvector('english', dp.content)
               @@ plainto_tsquery('english', :query)
           {file_filter}
@@ -137,6 +138,8 @@ async def _bm25_retrieve(
         rows = result.fetchall()
     except Exception:
         logger.exception("BM25 retrieval failed")
+        # Roll back the aborted transaction so subsequent queries on this session still work
+        await db.rollback()
         return {}
     return {row.id: float(row.rank) for row in rows}
 
@@ -201,7 +204,8 @@ async def retrieve(
         .join(FileRecord, DocumentParent.file_id == FileRecord.id)
         .where(
             DocumentParent.id.in_(top_ids),
-            FileRecord.user_id == user_id,  # re-enforce ownership at DB level
+            FileRecord.user_id == user_id,
+            FileRecord.is_active == True,  # exclude soft-deleted files  # noqa: E712
         )
     )
     rows = result.all()

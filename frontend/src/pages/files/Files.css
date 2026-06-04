@@ -1,0 +1,196 @@
+.files-page {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #020617, #0f172a 55%, #1e293b);
+    padding: 40px 24px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+.files-loading {
+    align-items: center;
+    color: #ececec;
+    font-size: 1rem;
+}
+
+.files-shell {
+    width: 100%;
+    max-width: 900px;
+    border-radius: 20px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    background: rgba(15, 23, 42, 0.85);
+    box-shadow: 0 24px 56px rgba(2, 6, 23, 0.5);
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.files-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.files-header-left {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.files-back {
+    color: #93c5fd;
+    text-decoration: none;
+    font-size: 0.9rem;
+    opacity: 0.8;
+    transition: opacity 0.15s;
+}
+
+.files-back:hover {
+    opacity: 1;
+}
+
+.files-title {
+    margin: 0;
+    color: #f8fafc;
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.files-upload-btn {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 18px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.files-upload-btn:hover {
+    opacity: 0.88;
+}
+
+.files-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 60px 0;
+    color: #94a3b8;
+    font-size: 1rem;
+}
+
+.files-empty p {
+    margin: 0;
+}
+
+/* Table */
+.files-table {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.files-table-head,
+.files-table-row {
+    display: grid;
+    grid-template-columns: 1fr 90px 120px 180px;
+    align-items: center;
+    padding: 14px 20px;
+    gap: 12px;
+}
+
+.files-table-head {
+    background: rgba(30, 41, 59, 0.8);
+    color: #8e8ea0;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+}
+
+.files-table-row {
+    background: rgba(15, 23, 42, 0.5);
+    border-top: 1px solid rgba(148, 163, 184, 0.1);
+    transition: background 0.15s;
+}
+
+.files-table-row:hover {
+    background: rgba(30, 41, 59, 0.6);
+}
+
+.files-filename {
+    color: #e2e8f0;
+    font-size: 0.95rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.files-size {
+    color: #94a3b8;
+    font-size: 0.88rem;
+}
+
+.files-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.files-action-btn {
+    border: none;
+    border-radius: 7px;
+    padding: 6px 12px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.files-action-btn:hover {
+    opacity: 0.82;
+}
+
+.files-download {
+    background: rgba(37, 99, 235, 0.2);
+    color: #93c5fd;
+    border: 1px solid rgba(37, 99, 235, 0.35);
+}
+
+.files-delete {
+    background: rgba(220, 38, 38, 0.15);
+    color: #fca5a5;
+    border: 1px solid rgba(220, 38, 38, 0.3);
+}
+
+/* Status badges */
+.fbadge {
+    display: inline-block;
+    border-radius: 6px;
+    padding: 3px 9px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.fbadge-queued    { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
+.fbadge-processing { background: rgba(37, 99, 235, 0.2);  color: #93c5fd; }
+.fbadge-complete  { background: rgba(22, 163, 74, 0.2);   color: #86efac; }
+.fbadge-retrying  { background: rgba(217, 119, 6, 0.2);   color: #fcd34d; }
+.fbadge-failed    { background: rgba(220, 38, 38, 0.2);   color: #fca5a5; }
+
+@media (max-width: 640px) {
+    .files-shell { padding: 20px 16px; }
+    .files-table-head,
+    .files-table-row { grid-template-columns: 1fr 70px 100px; }
+    .files-table-head span:last-child,
+    .files-table-row .files-actions { display: none; }
+}

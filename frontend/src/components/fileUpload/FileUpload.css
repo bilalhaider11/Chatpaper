@@ -151,12 +151,19 @@
 .badge-retrying  { background: rgba(234,88,12,0.2);   color: #fdba74; }
 .badge-failed    { background: rgba(220,38,38,0.2);   color: #fca5a5; }
 
-.file-row a {
+.file-row a,
+.file-download-btn {
     color: #93c5fd;
     text-decoration: none;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
 }
 
 .file-row span {

@@ -4,9 +4,10 @@ import { useDropzone } from "react-dropzone";
 import { ACCEPTED_FILE_TYPES } from "../../services/file_config";
 import {
   deleteFile,
+  downloadFile,
   FileRecord,
+  getApiErrorMessage,
   getFiles,
-  toFileUrl,
   uploadFile,
 } from "../../services/files_api";
 import FilePreview from "./FilePreview";
@@ -35,7 +36,7 @@ const StatusBadge = ({ status }: { status: string | null }) => {
 type FileUploadProps = {
   variant?: "embedded" | "modal";
   onClose?: () => void;
-  onUploadSuccess?: () => Promise<void> | void;
+  onUploadSuccess?: (file: FileRecord) => Promise<void> | void;
   showFileList?: boolean;
   subtitle?: string;
 };
@@ -49,7 +50,6 @@ function FileUpload({
 }: FileUploadProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [description, setDescription] = useState("");
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -112,35 +112,33 @@ function FileUpload({
     setUploadProgress(0);
     setMessage("");
 
-    let uploaded = false;
+    let record: FileRecord | null = null;
 
     try {
-      await uploadFile(selectedFile, description, setUploadProgress);
-      uploaded = true;
+      record = await uploadFile(selectedFile, setUploadProgress);
       setMessage("File uploaded successfully.");
       setSelectedFile(null);
-      setDescription("");
-    } catch {
-      setMessage("Failed to upload file.");
+    } catch (err) {
+      setMessage(getApiErrorMessage(err, "Failed to upload file."));
     } finally {
       uploadInFlightRef.current = false;
       setUploading(false);
       setUploadProgress(null);
     }
 
-    if (!uploaded) return;
+    if (!record) return;
 
     if (showFileList) {
       void loadFiles();
     }
 
     try {
-      await onUploadSuccess?.();
+      await onUploadSuccess?.(record);
       if (variant === "modal") {
         onClose?.();
       }
-    } catch {
-      setMessage("Failed to upload file.");
+    } catch (err) {
+      setMessage(getApiErrorMessage(err, "Failed to upload file."));
     } finally {
       setUploading(false);
     }
@@ -181,14 +179,6 @@ function FileUpload({
         />
       ) : null}
 
-      <input
-        type="text"
-        className="upload-description-input"
-        placeholder="Description (optional)"
-        value={description}
-        onChange={(event) => setDescription(event.target.value)}
-        disabled={uploading}
-      />
 
       <button
         type="button"
@@ -221,13 +211,13 @@ function FileUpload({
           ) : (
             files.map((file) => (
               <div key={file.id} className="file-row">
-                <a
-                  href={toFileUrl(file.id)}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  className="file-download-btn"
+                  onClick={() => void downloadFile(file.id, file.filename)}
                 >
                   {file.filename}
-                </a>
+                </button>
                 <span>{Math.round(file.filesize / 1024)} KB</span>
                 <StatusBadge status={file.ingestion_status} />
                 <button

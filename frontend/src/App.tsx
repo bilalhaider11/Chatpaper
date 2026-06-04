@@ -3,6 +3,7 @@ import { useState } from "react";
 import Home from "./pages/home/Home";
 import Login from "./pages/login/Login";
 import Chatbot from "./pages/chatbot/Chatbot";
+import Files from "./pages/files/Files";
 import { tokenStore } from "./api/axios";
 
 function App() {
@@ -33,6 +34,10 @@ function App() {
       <Route
         path="/chat/:conversationId"
         element={isAuthenticated ? <Chatbot /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/files"
+        element={isAuthenticated ? <Files /> : <Navigate to="/login" replace />}
       />
       <Route
         path="*"
