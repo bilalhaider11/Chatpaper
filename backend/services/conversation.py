@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timezone
-
+from core.redis_client import get_redis
 from fastapi import HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -230,35 +230,158 @@ async def get_conversations(
     if not chat_list_id:
         raise HTTPException(status_code=400, detail="Chat does not exist")
 
-    stmt = select(Conversation).where(Conversation.chat_id == chat_list_id)
+    redis_client = await get_redis()
+
+    cache_key = _history_cache_key(chat_list_id)
+
+    # =========================================================
+    # 1. NORMAL LOAD (NO CURSOR) → TRY REDIS FIRST
+    # =========================================================
+    if cursor_id is None:
+        cached_rows = await _load_cached_history_rows(
+            redis_client,
+            chat_list_id,
+        )
+
+        # CACHE HIT → ZERO DB CALL
+        if cached_rows:
+            messages = [
+                _cache_row_to_message(row)
+                for row in cached_rows
+            ]
+
+            # attach runtime messages (pending + streaming)
+            pending = await get_pending_messages(chat_list_id)
+            streams = await get_active_streams(chat_list_id)
+
+            for msg in pending:
+                messages.append(_pending_to_message(msg))
+
+            for stream in streams:
+                messages.append(
+                    _stream_to_message(chat_list_id, stream)
+                )
+
+            messages = _sort_messages_asc(messages)
+
+            return ConversationPageResponse(
+                messages=[
+                    ConversationResponse.model_validate(m)
+                    for m in messages
+                ],
+                next_cursor_id=None,
+            )
+
+    # =========================================================
+    # 2. CACHE MISS OR SCROLL → HIT DB
+    # =========================================================
+    stmt = select(Conversation).where(
+        Conversation.chat_id == chat_list_id
+    )
+
     if cursor_id is not None:
         stmt = stmt.where(Conversation.id < cursor_id)
 
-    stmt = stmt.order_by(Conversation.created_at.desc(), Conversation.id.desc()).limit(limit)
+    stmt = (
+        stmt.order_by(
+            Conversation.created_at.desc(),
+            Conversation.id.desc(),
+        )
+        .limit(limit)
+    )
+
     result = await db.execute(stmt)
     rows = list(result.scalars().all())
     rows.reverse()
 
-    messages = [_conversation_row_to_message(row) for row in rows]
+    db_messages = [
+        _conversation_row_to_message(row)
+        for row in rows
+    ]
 
+    # =========================================================
+    # 3. FIRST LOAD → INIT CACHE
+    # =========================================================
+    if cursor_id is None:
+        await _save_cached_history_rows(
+            redis_client,
+            chat_list_id,
+            [
+                _message_to_cache_row(m)
+                for m in db_messages
+                if m.get("id") is not None
+            ],
+        )
+
+    # =========================================================
+    # 4. SCROLL → MERGE INTO CACHE
+    # =========================================================
+    else:
+        cached_rows = await _load_cached_history_rows(
+            redis_client,
+            chat_list_id,
+        )
+
+        cached_messages = [
+            _cache_row_to_message(r)
+            for r in cached_rows
+        ]
+
+        merged = _merge_messages_asc(
+            cached_messages,
+            db_messages,
+        )
+
+        await _save_cached_history_rows(
+            redis_client,
+            chat_list_id,
+            [
+                _message_to_cache_row(m)
+                for m in merged
+                if m.get("id") is not None
+            ],
+        )
+# convert cursor id logic implementation with offset logic for pagination and on frontend url, get_conversation ,for frontend make its seperate component with the id of get_conversation 
+#http://localhost:8000/api/conversation/get-conversation/2?limit=25 instead of /chatbot has all the conversations and on click of each conversation it should open the conversation page with url http://localhost:5173/conversation/2 and in that page we will call the api http://localhost:8000/api/conversation/get-conversation/2?limit=25 to get the conversations of that particular conversation list id and show in that page and implement pagination with offset and limit logic instead of cursor id logic for pagination
+    # =========================================================
+    # 5. ADD REAL-TIME MESSAGES (ONLY ON FIRST PAGE)
+    # =========================================================
     if cursor_id is None:
         pending = await get_pending_messages(chat_list_id)
         streams = await get_active_streams(chat_list_id)
-        for msg in pending:
-            messages.append(_pending_to_message(msg))
-        for stream in streams:
-            messages.append(_stream_to_message(chat_list_id, stream))
-        messages = _sort_messages_asc(messages)
 
+        for msg in pending:
+            db_messages.append(_pending_to_message(msg))
+
+        for stream in streams:
+            db_messages.append(
+                _stream_to_message(chat_list_id, stream)
+            )
+
+    messages = _sort_messages_asc(db_messages)
+
+    # =========================================================
+    # 6. NEXT CURSOR LOGIC (UNCHANGED)
+    # =========================================================
     next_cursor: int | None = None
+
     persisted_ids = [row.id for row in rows if row.id is not None]
+
     if persisted_ids:
         oldest_id = min(persisted_ids)
-        if await _has_older_messages(db, chat_list_id, oldest_id):
+
+        if await _has_older_messages(
+            db,
+            chat_list_id,
+            oldest_id,
+        ):
             next_cursor = oldest_id
 
     return ConversationPageResponse(
-        messages=[ConversationResponse.model_validate(m) for m in messages],
+        messages=[
+            ConversationResponse.model_validate(m)
+            for m in messages
+        ],
         next_cursor_id=next_cursor,
     )
 

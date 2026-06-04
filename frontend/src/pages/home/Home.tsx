@@ -14,7 +14,6 @@ function Home({ onLogout }: HomeProps) {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -27,6 +26,7 @@ function Home({ onLogout }: HomeProps) {
         setUser(currentUser);
       } catch {
         tokenStore.clear();
+        onLogout();
         navigate("/login", { replace: true });
       } finally {
         setLoading(false);
@@ -34,11 +34,7 @@ function Home({ onLogout }: HomeProps) {
     };
 
     void bootstrap();
-  }, [navigate]);
-
-  const handleStartChat = () => {
-    navigate("/chatbot");
-  };
+  }, [navigate, onLogout]);
 
   const logout = () => {
     tokenStore.clear();
@@ -63,10 +59,7 @@ function Home({ onLogout }: HomeProps) {
               File Processing Platform
             </span>
             <div className="flex flex-wrap items-center gap-2.5">
-              <button type="button" className={actionBtnClass} onClick={() => void handleStartChat()}>
-                Start chat
-              </button>
-              <Link to="/chatbot" className={actionBtnClass}>
+              <Link to="/chat" state={{ openUpload: true }} className={actionBtnClass}>
                 Open chatbot
               </Link>
               <button type="button" className={actionBtnClass} onClick={logout}>
@@ -100,17 +93,15 @@ function Home({ onLogout }: HomeProps) {
               </li>
             ))}
           </ul>
-
-          {message ? <p className="mt-4 text-sm text-blue-300">{message}</p> : null}
         </div>
 
-       { /*<div className="flex items-center border-t border-slate-400/20 p-6 sm:border-t-0 sm:border-l sm:p-10">
+        <div className="flex items-center border-t border-slate-400/20 p-6 sm:border-t-0 sm:border-l sm:p-10">
           <FileUpload
             variant="embedded"
             showFileList
-            subtitle="Upload a file on the chatbot page to start a conversation. Each chat requires its own upload."
-          /> 
-        </div>*/}
+            subtitle="Files are saved in backend `/files` and metadata is stored in DB."
+          />
+        </div>
       </div>
     </div>
   );

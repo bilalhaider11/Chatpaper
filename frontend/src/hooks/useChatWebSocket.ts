@@ -1,69 +1,98 @@
-import { useCallback, useEffect, useRef } from "react";
-import { getChatWebSocketUrl, ChatWsEvent } from "../services/conversation_api";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { tokenStore } from "../api/axios";
+import { ChatWsEvent, getChatWebSocketUrl } from "../services/conversation_api";
 
-type UseChatWebSocketOptions = {
+export type WsStatus = "disconnected" | "connecting" | "connected" | "failed";
+
+type Options = {
   chatListId: number | null;
   onEvent: (event: ChatWsEvent) => void;
   enabled?: boolean;
 };
 
-export function useChatWebSocket({
-  chatListId,
-  onEvent,
-  enabled = true,
-}: UseChatWebSocketOptions) {
-  const socketRef = useRef<WebSocket | null>(null);
+const MAX_ATTEMPTS = 10;
+
+export function useChatWebSocket({ chatListId, onEvent, enabled = true }: Options) {
+  const wsRef = useRef<WebSocket | null>(null);
+  const attemptsRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onEventRef = useRef(onEvent);
+  const [status, setStatus] = useState<WsStatus>("disconnected");
 
   useEffect(() => {
     onEventRef.current = onEvent;
   }, [onEvent]);
 
-  const sendMessage = useCallback(
-    (statement: string) => {
-      if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-        return false;
-      }
-      socketRef.current.send(
-        JSON.stringify({
-          action: "send",
-          statement,
-          
-        })
-      );
-      return true;
-    },
-    []
-  );
-
   useEffect(() => {
-    if (!enabled || !chatListId) {
-      return;
-    }
+    if (!enabled || !chatListId) return;
 
-    const url = getChatWebSocketUrl(chatListId);
-    const socket = new WebSocket(url);
-    socketRef.current = socket;
+    let intentionalClose = false;
 
-    socket.onopen = () => {
-      socket.send(JSON.stringify({ action: "auth", token: tokenStore.getToken() ?? "" }));
+    const connect = () => {
+      const token = tokenStore.getToken();
+      if (!token) return;
+
+      setStatus("connecting");
+      const ws = new WebSocket(getChatWebSocketUrl(chatListId));
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        attemptsRef.current = 0;
+        ws.send(JSON.stringify({ action: "auth", token }));
+        setStatus("connected");
+      };
+
+      ws.onmessage = (event) => {
+        let data: ChatWsEvent;
+        try {
+          data = JSON.parse(event.data as string) as ChatWsEvent;
+        } catch {
+          return;
+        }
+        if (data.type === "ping") return;
+        onEventRef.current(data);
+      };
+
+      ws.onclose = () => {
+        if (wsRef.current === ws) wsRef.current = null;
+        if (intentionalClose) return;
+        if (attemptsRef.current >= MAX_ATTEMPTS) {
+          setStatus("failed");
+          return;
+        }
+        setStatus("disconnected");
+        const delay = Math.min(1000 * 2 ** attemptsRef.current, 30_000);
+        attemptsRef.current += 1;
+        retryTimerRef.current = setTimeout(connect, delay);
+      };
+
+      ws.onerror = () => {
+        // onclose fires after onerror; reconnect logic lives there
+      };
     };
 
-    socket.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data) as ChatWsEvent;
-        onEventRef.current(payload);
-      } catch {
-        // ignore malformed payloads
-      }
-    };
+    connect();
 
     return () => {
-      socket.close();
-      socketRef.current = null;
+      intentionalClose = true;
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+      wsRef.current?.close();
+      wsRef.current = null;
+      attemptsRef.current = 0;
+      setStatus("disconnected");
     };
   }, [chatListId, enabled]);
 
-  return { sendMessage };
+  const sendMessage = useCallback((statement: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ action: "send", statement }));
+      return true;
+    }
+    return false;
+  }, []);
+
+  return { sendMessage, status };
 }

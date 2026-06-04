@@ -1,50 +1,53 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
-import SystemMessageModal from "../../components/chatbot/SystemMessageModal";
 import FileUpload from "../../components/fileUpload/FileUpload";
 import { DeleteIcon, EditIcon } from "../../components/icons/ActionIcons";
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
-import { FileRecord } from "../../services/files_api";
+import { getFiles } from "../../services/files_api";
 import {
   ChatWsEvent,
   Conversation,
   ConversationListItem,
-  createConversationList,
-  getConversation,
-  getConversationList,
   LiveMessage,
-  normalizeUserType,
+  createConversationList,
   deleteConversationList,
   editConversationListTitle,
+  getConversation,
+  getConversationList,
+  normalizeUserType,
 } from "../../services/conversation_api";
 
 const sidebarBtnClass =
   "w-full cursor-pointer rounded-[10px] border border-white/10 bg-transparent px-3 py-2.5 text-[0.95rem] text-[#ececec] transition-colors hover:bg-blue-900/10 disabled:cursor-not-allowed disabled:opacity-60";
 
 function Chatbot() {
+  const { conversationId: urlId } = useParams<{ conversationId?: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const openUploadOnLoad =
+    (location.state as { openUpload?: boolean } | null)?.openUpload === true;
+
   const [editingId, setEditingId] = useState(0);
   const [editTitle, setEditTitle] = useState("");
-  const [isopen, setisopen] = useState(false);
-  const [systemModalOpen, setSystemModalOpen] = useState(false);
-  const navigate = useNavigate();
+  const [isopen, setisopen] = useState(openUploadOnLoad);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesScrollRef = useRef<HTMLElement | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [input, setInput] = useState("");
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
-  const [selectedConversationId, setSelectedConversationId] = useState<number | null>(
-    null
-  );
+  const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
+  const selectedConvRef = useRef<number | null>(null);
+  const [hasUploadedFile, setHasUploadedFile] = useState(false);
   const [messages, setMessages] = useState<Conversation[]>([]);
   const [liveMessages, setLiveMessages] = useState<LiveMessage[]>([]);
-  const [nextCursorId, setNextCursorId] = useState<number | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [isNearBottom, setIsNearBottom] = useState(true);
   const [loading, setLoading] = useState(true);
   const [creatingChat, setCreatingChat] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [sendingSystem, setSendingSystem] = useState(false);
+
+  const isStreaming = liveMessages.some((m) => m.streaming);
+
+  useEffect(() => {
+    selectedConvRef.current = selectedConversationId;
+  }, [selectedConversationId]);
 
   const loadConversationList = async () => {
     const list = await getConversationList();
@@ -52,166 +55,84 @@ function Chatbot() {
     return list;
   };
 
-  const loadMessages = async (conversationListId: number) => {
-    const page = await getConversation(conversationListId, null, 25);
-    setMessages(page.messages);
-    setNextCursorId(page.next_cursor_id);
-    setLiveMessages([]);
-    setIsNearBottom(true);
-  };
+  const displayedMessages = useMemo(() => {
+    const stripCitations = (text: string) => text.replace(/\s*\[\d+\]/g, "");
+
+    const persisted = messages.map((message) => ({
+      key: `db-${message.id}`,
+      user_type: normalizeUserType(message.user_type),
+      statement: stripCitations(message.statement),
+      streaming: false,
+      pending: false,
+    }));
+
+    const live = liveMessages.map((message) => ({
+      key: message.tempId,
+      user_type: message.user_type,
+      statement: stripCitations(message.statement),
+      streaming: Boolean(message.streaming),
+      pending: Boolean(message.pending),
+    }));
+
+    return [...persisted, ...live];
+  }, [messages, liveMessages]);
 
   const handleWsEvent = useCallback((event: ChatWsEvent) => {
-    if (event.type === "error") return;
-
-    if (event.type === "message") {
-      setLiveMessages((prev) => {
-        const index = prev.findIndex((item) => item.tempId === event.temp_id);
-        if (index >= 0) {
-          const next = [...prev];
-          next[index] = {
-            ...next[index],
-            user_type: normalizeUserType(event.user_type),
-            statement: event.statement,
-            streaming: false,
-            id: event.id,
-            created_at: event.created_at ?? next[index].created_at,
-          };
-          return next;
-        }
-        return [
-          ...prev,
-          {
-            tempId: event.temp_id,
-            user_type: normalizeUserType(event.user_type),
-            statement: event.statement,
-            created_at: event.created_at,
-          },
-        ];
-      });
-      return;
-    }
-
     if (event.type === "chunk") {
       setLiveMessages((prev) => {
-        const index = prev.findIndex((item) => item.tempId === event.temp_id);
-        if (index >= 0) {
-          const next = [...prev];
-          next[index] = {
-            ...next[index],
-            statement: next[index].statement + event.chunk,
-            streaming: true,
-            created_at: event.created_at ?? next[index].created_at,
-          };
-          return next;
+        const existing = prev.find((m) => m.tempId === event.temp_id);
+        if (existing) {
+          return prev.map((m) =>
+            m.tempId === event.temp_id
+              ? { ...m, statement: m.statement + event.chunk, streaming: true }
+              : m
+          );
         }
         return [
-          ...prev,
+          ...prev.filter((m) => !m.pending),
           {
             tempId: event.temp_id,
-            user_type: "system",
+            user_type: "system" as const,
             statement: event.chunk,
             streaming: true,
-            created_at: event.created_at,
           },
         ];
       });
-      return;
-    }
-
-    if (event.type === "done") {
-      setLiveMessages((prev) => {
-        const index = prev.findIndex((item) => item.tempId === event.temp_id);
-        if (index >= 0) {
-          const next = [...prev];
-          next[index] = {
-            ...next[index],
-            statement: event.statement,
-            streaming: false,
-            id: event.id,
-            created_at: event.created_at ?? next[index].created_at,
-          };
-          return next;
-        }
-        return [
-          ...prev,
-          {
-            tempId: event.temp_id,
-            user_type: "system",
-            statement: event.statement,
-            created_at: event.created_at,
-          },
-        ];
-      });
+    } else if (event.type === "done") {
+      setLiveMessages((prev) =>
+        prev.map((m) =>
+          m.tempId === event.temp_id
+            ? { ...m, statement: event.statement, streaming: false }
+            : m
+        )
+      );
+    } else if (event.type === "error") {
+      setLiveMessages((prev) => prev.filter((m) => !m.streaming && !m.pending));
     }
   }, []);
 
-  const { sendMessage: sendWsMessage } = useChatWebSocket({
+  const { sendMessage: sendWsMessage, status: wsStatus } = useChatWebSocket({
     chatListId: selectedConversationId,
     onEvent: handleWsEvent,
-    enabled: Boolean(selectedConversationId),
+    enabled: !loading,
   });
 
-  const displayedMessages = useMemo(() => {
-    const byKey = new Map<
-      string,
-      {
-        key: string;
-        user_type: "user" | "system";
-        statement: string;
-        streaming: boolean;
-        created_at?: string | null;
-      }
-    >();
-
-    for (const message of messages) {
-      const key =
-        message.id != null
-          ? `id:${message.id}`
-          : `temp:${message.temp_id ?? "unknown"}`;
-      byKey.set(key, {
-        key,
-        user_type: normalizeUserType(message.user_type),
-        statement: message.statement,
-        streaming: Boolean(message.streaming),
-        created_at: message.created_at,
-      });
-    }
-
-    for (const live of liveMessages) {
-      const key = `temp:${live.tempId}`;
-      const existing = byKey.get(key);
-      byKey.set(key, {
-        key,
-        user_type: live.user_type,
-        statement: live.statement,
-        streaming: Boolean(live.streaming),
-        created_at: live.created_at ?? existing?.created_at ?? null,
-      });
-    }
-
-    return Array.from(byKey.values()).sort((a, b) => {
-      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return ta - tb;
-    });
-  }, [messages, liveMessages]);
-
   useEffect(() => {
-    const bootstrap = async () => {
+    const init = async () => {
       if (!tokenStore.getToken()) {
         navigate("/login", { replace: true });
         return;
       }
-
       try {
         const currentUser = await fetchCurrentUser();
         setUser(currentUser);
-        const list = await loadConversationList();
+        const list = await getConversationList();
+        setConversations(list);
         if (list.length > 0) {
-          setisopen(false);
-          setSelectedConversationId(list[0].id);
-          await loadMessages(list[0].id);
+          setHasUploadedFile(true);
         } else {
+          const files = await getFiles();
+          setHasUploadedFile(files.length > 0);
           setisopen(true);
         }
       } catch {
@@ -221,112 +142,106 @@ function Chatbot() {
         setLoading(false);
       }
     };
-
-    void bootstrap();
+    void init();
   }, [navigate]);
 
   useEffect(() => {
-    if (!isNearBottom || loadingMore) return;
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [displayedMessages, isNearBottom, loadingMore]);
+    if (loading) return;
 
-  const handleSelectConversation = async (conversationListId: number) => {
-    setSelectedConversationId(conversationListId);
-    await loadMessages(conversationListId);
-  };
+    const parsedId = urlId !== undefined ? parseInt(urlId, 10) : null;
+    if (parsedId !== null && isNaN(parsedId)) {
+      navigate("/chat", { replace: true });
+      return;
+    }
 
-  const loadOlderMessages = useCallback(async () => {
-    if (!selectedConversationId) return;
-    if (!nextCursorId) return;
-    if (loadingMore) return;
-
-    const el = messagesScrollRef.current;
-    if (!el) return;
-
-    const prevScrollHeight = el.scrollHeight;
-    const prevScrollTop = el.scrollTop;
-
-    setLoadingMore(true);
-    try {
-      const page = await getConversation(selectedConversationId, nextCursorId, 25);
-      if (page.messages.length > 0) {
-        const keyFor = (m: Conversation) =>
-          m.id != null ? `id:${m.id}` : `temp:${m.temp_id ?? m.created_at ?? "unknown"}`;
-
-        setMessages((prev) => {
-          const next = [...page.messages, ...prev];
-          const map = new Map<string, Conversation>();
-          for (const msg of next) map.set(keyFor(msg), msg);
-          return Array.from(map.values());
-        });
+    const run = async () => {
+      if (parsedId !== null) {
+        if (selectedConvRef.current === parsedId) return;
+        try {
+          setSelectedConversationId(parsedId);
+          const page = await getConversation(parsedId);
+          setMessages(page.messages);
+          setLiveMessages([]);
+        } catch {
+          navigate("/chat", { replace: true });
+        }
+      } else if (conversations.length > 0) {
+        navigate(`/chat/${conversations[0].id}`, { replace: true });
       }
-      setNextCursorId(page.next_cursor_id);
-    } finally {
-      setLoadingMore(false);
-      setIsNearBottom(false);
-      requestAnimationFrame(() => {
-        const updatedEl = messagesScrollRef.current;
-        if (!updatedEl) return;
-        const newScrollHeight = updatedEl.scrollHeight;
-        updatedEl.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
-      });
-    }
-  }, [selectedConversationId, nextCursorId, loadingMore]);
+    };
 
-  const handleMessagesScroll = useCallback(() => {
-    const el = messagesScrollRef.current;
-    if (!el) return;
+    void run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlId, loading, navigate]);
 
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setIsNearBottom(distanceFromBottom < 200);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [displayedMessages]);
 
-    if (el.scrollTop < 50 && nextCursorId && !loadingMore) {
-      void loadOlderMessages();
-    }
-  }, [loadOlderMessages, nextCursorId, loadingMore]);
+  const handleSelectConversation = (conversationListId: number) => {
+    navigate(`/chat/${conversationListId}`);
+  };
 
   const handleStartChat = () => {
     setisopen(true);
   };
 
-  const sendChatMessage = async (
-    text: string,
-    userType: "user" | "system",
-    setBusy: (value: boolean) => void
-  ) => {
-    if (!text.trim() || sending || sendingSystem) return;
+  const handleSend = async (event?: { preventDefault(): void }) => {
+    event?.preventDefault();
+    const text = input.trim();
+    if (!text || isStreaming || creatingChat) return;
 
     let conversationListId = selectedConversationId;
 
     if (!conversationListId) {
-      setisopen(true);
-      return;
+      if (!hasUploadedFile) {
+        setisopen(true);
+        return;
+      }
+      setCreatingChat(true);
+      try {
+        const files = await getFiles();
+        const fileId = files[0]?.id;
+        if (!fileId) {
+          setisopen(true);
+          return;
+        }
+        const newConversation = await createConversationList(fileId);
+        setConversations((prev) => [newConversation, ...prev]);
+        conversationListId = newConversation.id;
+        setSelectedConversationId(newConversation.id);
+        selectedConvRef.current = newConversation.id;
+        navigate(`/chat/${newConversation.id}`, { replace: true });
+      } finally {
+        setCreatingChat(false);
+      }
     }
 
-    setBusy(true);
+    if (!conversationListId) return;
 
-    const sent = sendWsMessage(text, userType);
+    const userTempId = `user-${crypto.randomUUID()}`;
+    setLiveMessages((prev) => [
+      ...prev,
+      { tempId: userTempId, user_type: "user" as const, statement: text },
+    ]);
+    setInput("");
+
+    const sent = sendWsMessage(text);
     if (!sent) {
-      setBusy(false);
-      return;
+      setLiveMessages((prev) => prev.filter((m) => m.tempId !== userTempId));
+      setInput(text);
+    } else {
+      setLiveMessages((prev) => [
+        ...prev,
+        {
+          tempId: "pending-ai",
+          user_type: "system" as const,
+          statement: "",
+          streaming: true,
+          pending: true,
+        },
+      ]);
     }
-
-    if (userType === "user") {
-      setInput("");
-    }
-
-    setBusy(false);
-  };
-
-  const handleSend = async (event?: FormEvent) => {
-    event?.preventDefault();
-    const text = input.trim();
-    if (!text) return;
-    await sendChatMessage(text, "user", setSending);
-  };
-
-  const handleSystemSend = async (text: string) => {
-    await sendChatMessage(text, "system", setSendingSystem);
   };
 
   const logout = () => {
@@ -339,14 +254,15 @@ function Chatbot() {
     const list = await loadConversationList();
     if (selectedConversationId === id) {
       const nextId = list[0]?.id ?? null;
-      setSelectedConversationId(nextId);
       if (nextId) {
-        await loadMessages(nextId);
+        navigate(`/chat/${nextId}`, { replace: true });
       } else {
+        navigate("/chat", { replace: true });
         setMessages([]);
         setLiveMessages([]);
-        setNextCursorId(null);
-        setisopen(true);
+        const files = await getFiles();
+        setHasUploadedFile(files.length > 0);
+        setisopen(files.length === 0);
       }
     }
   };
@@ -356,40 +272,23 @@ function Chatbot() {
     setEditTitle(conversation.conversation_title || "New chat");
   };
 
-  const handleUploadSuccess = async (file: FileRecord) => {
-    setCreatingChat(true);
+  const handleUploadSuccess = async () => {
     try {
+      setHasUploadedFile(true);
       const list = await loadConversationList();
-      const existing =
-        file.conversation_id != null
-          ? list.find((item) => item.id === file.conversation_id)
-          : list.find((item) => item.file_id === file.id);
-
-      const conversation =
-        existing ?? (await createConversationList(file.id));
-
-      if (!existing) {
-        setConversations((prev) => [conversation, ...prev]);
-      } else {
-        setConversations(list);
+      if (list.length > 0) {
+        setisopen(false);
+        navigate(`/chat/${list[0].id}`);
       }
-
-      setSelectedConversationId(conversation.id);
-      await loadMessages(conversation.id);
-      setisopen(false);
     } catch (error) {
       console.error("Failed to start chat after upload:", error);
       throw error;
-    } finally {
-      setCreatingChat(false);
     }
   };
 
-  const handleSaveEdit = async (e: React.FormEvent, id: number) => {
+  const handleSaveEdit = async (e: { preventDefault(): void }, id: number) => {
     e.preventDefault();
-
     if (!editTitle.trim()) return;
-
     try {
       await editConversationListTitle(editingId, editTitle);
       setConversations((prev) =>
@@ -397,7 +296,6 @@ function Chatbot() {
           item.id === id ? { ...item, conversation_title: editTitle } : item
         )
       );
-
       setEditingId(0);
     } catch (error) {
       console.error("Failed to update title:", error);
@@ -417,8 +315,8 @@ function Chatbot() {
   );
 
   return (
-    <div className="grid min-h-screen bg-[#1a1b27] text-[#ececec] md:grid-cols-[260px_1fr]">
-      <aside className="hidden min-h-screen flex-col border-r border-white/10 bg-[#1b2338] p-3 md:flex">
+    <div className="grid h-screen overflow-hidden bg-[#1a1b27] text-[#ececec] md:grid-cols-[minmax(260px,26vw)_1fr]">
+      <aside className="hidden min-h-0 flex-col overflow-hidden border-r border-white/10 bg-[#1b2338] p-4 md:flex">
         <div className="mb-3">
           <button
             type="button"
@@ -434,23 +332,29 @@ function Chatbot() {
           Conversations
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto pr-0.5">
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden pr-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {conversations.length === 0 ? (
             <p className="m-0 px-2.5 py-2.5 text-sm text-[#8e8ea0]">
-              No conversations yet. Upload a file to start a new chat.
+              No conversations yet. Start a new chat.
             </p>
           ) : (
             conversations.map((conversation) => {
               const isActive = conversation.id === selectedConversationId;
               return (
-                <button
+                <div
                   key={conversation.id}
-                  type="button"
-                  className={`flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] border-0 px-3 py-2.5 text-left transition-colors ${isActive
-                    ? "bg-blue-300/10"
-                    : "bg-transparent hover:bg-sky-200/10"
-                    }`}
-                  onClick={() => void handleSelectConversation(conversation.id)}
+                  role="button"
+                  tabIndex={0}
+                  className={`group flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-3 py-2.5 text-left transition-colors ${
+                    isActive
+                      ? "bg-blue-300/10"
+                      : "bg-transparent hover:bg-sky-200/10"
+                  }`}
+                  onClick={() => handleSelectConversation(conversation.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ")
+                      handleSelectConversation(conversation.id);
+                  }}
                 >
                   {editingId === conversation.id ? (
                     <form
@@ -487,7 +391,11 @@ function Chatbot() {
                       <span className="min-w-0 flex-1 truncate text-sm">
                         {conversation.conversation_title || "New chat"}
                       </span>
-                      <div className="ml-auto flex shrink-0 items-center gap-1">
+                      <div
+                        className={`ml-auto flex shrink-0 items-center gap-1 transition-opacity ${
+                          isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                        }`}
+                      >
                         <button
                           type="button"
                           className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-[#6994e6] hover:bg-white/10 hover:text-[#93b4f5]"
@@ -513,7 +421,7 @@ function Chatbot() {
                       </div>
                     </>
                   )}
-                </button>
+                </div>
               );
             })
           )}
@@ -536,7 +444,7 @@ function Chatbot() {
         </div>
       </aside>
 
-      <main className="grid min-h-screen grid-rows-[auto_1fr_auto]">
+      <main className="grid min-h-0 grid-rows-[auto_1fr_auto] overflow-hidden">
         <header className="flex items-center justify-between gap-4 border-b border-white/10 px-6 py-4">
           <div>
             <h1 className="m-0 text-[1.05rem] font-semibold">
@@ -544,36 +452,34 @@ function Chatbot() {
             </h1>
             <span className="text-sm text-[#8e8ea0]">{user?.email}</span>
           </div>
-          <button
-            type="button"
-            className="cursor-pointer whitespace-nowrap rounded-[10px] border border-[#6994e6]/45 bg-[#052b72]/35 px-3.5 py-2 text-sm text-[#c9dcff] hover:bg-[#052b72]/60 disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={() => setSystemModalOpen(true)}
-            disabled={!selectedConversationId || creatingChat}
-          >
-            System message
-          </button>
+          <div className="flex items-center gap-2">
+            {wsStatus === "failed" && (
+              <span className="rounded-full bg-red-900/40 px-2.5 py-1 text-xs text-red-300">
+                Connection lost
+              </span>
+            )}
+            {wsStatus === "connecting" && (
+              <span className="rounded-full bg-amber-900/40 px-2.5 py-1 text-xs text-amber-200">
+                Connecting…
+              </span>
+            )}
+          </div>
         </header>
 
-        <section
-          ref={(node) => {
-            messagesScrollRef.current = node;
-          }}
-          onScroll={() => handleMessagesScroll()}
-          className="flex flex-col gap-4 overflow-y-auto p-6 min-h-0"
-        >
+        <section className="flex min-h-0 flex-col gap-5 overflow-y-auto p-7 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {isopen ? (
             <FileUpload
               variant="modal"
               onClose={() => setisopen(false)}
               onUploadSuccess={handleUploadSuccess}
-              subtitle="Upload a document to start this chat. Each conversation requires its own file."
+              subtitle="Upload a document to use with this chat session."
             />
           ) : null}
           {!selectedConversationId && displayedMessages.length === 0 ? (
             <div className="m-auto max-w-[420px] text-center text-[#c5c5d2]">
               <h2 className="mb-2 text-2xl text-[#ececec]">How can I help you today?</h2>
               <p className="mb-5">
-                Upload a document to start a new chat, or select a conversation from the sidebar.
+                Start a new chat or select a conversation from the sidebar.
               </p>
               <button
                 type="button"
@@ -589,50 +495,49 @@ function Chatbot() {
               <p>Send a message to begin this conversation.</p>
             </div>
           ) : (
-            <>
-              {nextCursorId ? (
-                <div className="sticky top-0 z-10 mb-4 flex items-center justify-center">
-                  <button
-                    type="button"
-                    onClick={() => void loadOlderMessages()}
-                    disabled={loadingMore}
-                    className="rounded-full border border-white/10 bg-[#1b2338]/90 px-3 py-1 text-xs text-[#c5c5d2] transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {loadingMore ? "Loading older messages…" : "Scroll up to load older messages"}
-                  </button>
-                </div>
-              ) : null}
-              {displayedMessages.map((message) => {
-                const isUser = message.user_type === "user";
-                return (
+            displayedMessages.map((message) => {
+              const isUser = message.user_type === "user";
+              return (
+                <div
+                  key={message.key}
+                  className={`flex max-w-[72%] flex-col gap-1 sm:max-w-[90%] ${
+                    isUser ? "self-end" : "self-start"
+                  }`}
+                >
                   <div
-                    key={message.key}
-                    className={`flex max-w-[72%] flex-col gap-1 sm:max-w-[90%] ${isUser ? "self-end" : "self-start"
-                      }`}
+                    className={`px-1 text-xs text-[#8e8ea0] ${
+                      isUser ? "text-right" : "text-left"
+                    }`}
                   >
-                    <div
-                      className={`px-1 text-xs text-[#8e8ea0] ${isUser ? "text-right" : "text-left"
-                        }`}
-                    >
-                      {isUser ? "You" : "System"}
-                    </div>
-                    <div
-                      className={`break-words rounded-[14px] px-3.5 py-3 leading-relaxed ${isUser
+                    {isUser ? "You" : "Assistant"}
+                  </div>
+                  <div
+                    className={`break-words rounded-[14px] px-3.5 py-3 leading-relaxed ${
+                      isUser
                         ? "rounded-tr-sm bg-[#031055] text-white"
                         : "rounded-tl-sm bg-[#2f2f2f]"
-                        } ${message.streaming ? "border border-[#6994e6]/35" : ""}`}
-                    >
-                      {message.statement}
-                      {message.streaming ? (
-                        <span className="ml-0.5 inline-block animate-blink">▍</span>
-                      ) : null}
-                    </div>
+                    } ${message.streaming ? "border border-[#6994e6]/35" : ""}`}
+                  >
+                    {message.pending ? (
+                      <span className="inline-flex gap-1.5">
+                        <span className="size-2 animate-bounce rounded-full bg-[#8e8ea0] [animation-delay:0ms]" />
+                        <span className="size-2 animate-bounce rounded-full bg-[#8e8ea0] [animation-delay:150ms]" />
+                        <span className="size-2 animate-bounce rounded-full bg-[#8e8ea0] [animation-delay:300ms]" />
+                      </span>
+                    ) : (
+                      <>
+                        {message.statement}
+                        {message.streaming ? (
+                          <span className="ml-0.5 inline-block animate-blink">▍</span>
+                        ) : null}
+                      </>
+                    )}
                   </div>
-                );
-              })}
-              <div ref={messagesEndRef} />
-            </>
+                </div>
+              );
+            })
           )}
+          <div ref={messagesEndRef} />
         </section>
 
         <footer className="border-t border-white/10 bg-[#212121] px-6 pb-6 pt-4">
@@ -640,30 +545,36 @@ function Chatbot() {
             onSubmit={(event) => void handleSend(event)}
             className="mx-auto flex max-w-[900px] gap-2.5"
           >
-              <input
-                placeholder="Type your message..."
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                disabled={sending || creatingChat}
-                className="flex-1 rounded-full border border-white/10 bg-[#2f2f2f] px-[18px] py-3.5 text-[#ececec] outline-none focus:border-sky-200/60"
-              />
-              <button
-                type="submit"
-                disabled={!input.trim() || sending || creatingChat}
-                className="cursor-pointer rounded-full border-0 bg-[#052b72] px-[22px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                Send
-              </button>
-            </form>
-          </footer>
+            <input
+              placeholder={
+                wsStatus === "failed"
+                  ? "Connection lost — refresh to reconnect"
+                  : wsStatus !== "connected"
+                    ? "Connecting…"
+                    : "Type your message…"
+              }
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              disabled={isStreaming || creatingChat || wsStatus !== "connected"}
+              className="flex-1 rounded-full border border-white/10 bg-[#2f2f2f] px-[18px] py-3.5 text-[#ececec] outline-none focus:border-sky-200/60 disabled:opacity-55"
+            />
+            <button
+              type="submit"
+              disabled={
+                !input.trim() ||
+                isStreaming ||
+                creatingChat ||
+                wsStatus !== "connected"
+              }
+              className="cursor-pointer rounded-full border-0 bg-[#052b72] px-[22px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              {wsStatus === "connecting" || wsStatus === "disconnected"
+                ? "Connecting…"
+                : "Send"}
+            </button>
+          </form>
+        </footer>
       </main>
-
-      <SystemMessageModal
-        open={systemModalOpen}
-        onClose={() => setSystemModalOpen(false)}
-        onSend={handleSystemSend}
-        sending={sendingSystem}
-      />
     </div>
   );
 }

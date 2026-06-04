@@ -4,17 +4,56 @@ import { useDropzone } from "react-dropzone";
 import { ACCEPTED_FILE_TYPES } from "../../services/file_config";
 import {
   deleteFile,
+  fileDownloadUrl,
   FileRecord,
   getFiles,
-  fileDownloadUrl,
   uploadFile,
 } from "../../services/files_api";
 import FilePreview from "./FilePreview";
 
+const badgeStyles: Record<string, string> = {
+  "badge-queued": "bg-slate-500/25 text-slate-400",
+  "badge-processing": "bg-blue-600/20 text-blue-300",
+  "badge-complete": "bg-green-600/20 text-green-300",
+  "badge-retrying": "bg-orange-600/20 text-orange-300",
+  "badge-failed": "bg-red-600/20 text-red-300",
+};
+
+const StatusBadge = ({ status }: { status: string | null }) => {
+  let label: string;
+  let cls: string;
+
+  if (!status || status === "QUEUED") {
+    label = "Queued";
+    cls = "badge-queued";
+  } else if (status.startsWith("STAGE_")) {
+    const n = status.split("_")[1];
+    label = `Processing ${n}/6`;
+    cls = "badge-processing";
+  } else if (status === "COMPLETE") {
+    label = "Ready";
+    cls = "badge-complete";
+  } else if (status === "FAILED_RETRYABLE") {
+    label = "Retrying";
+    cls = "badge-retrying";
+  } else {
+    label = "Failed";
+    cls = "badge-failed";
+  }
+
+  return (
+    <span
+      className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold whitespace-nowrap ${badgeStyles[cls]}`}
+    >
+      {label}
+    </span>
+  );
+};
+
 type FileUploadProps = {
   variant?: "embedded" | "modal";
   onClose?: () => void;
-  onUploadSuccess?: (file: FileRecord) => Promise<void> | void;
+  onUploadSuccess?: () => Promise<void> | void;
   showFileList?: boolean;
   subtitle?: string;
 };
@@ -34,6 +73,7 @@ function FileUpload({
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const uploadInFlightRef = useRef(false);
 
@@ -41,6 +81,17 @@ function FileUpload({
     const fileList = await getFiles();
     setFiles(fileList);
   };
+
+  const isTerminal = (status: string | null) =>
+    status === "COMPLETE" || status === "FAILED_PERMANENT" || status == null;
+
+  const hasPending = files.some((f) => !isTerminal(f.ingestion_status ?? null));
+
+  useEffect(() => {
+    if (!showFileList || !hasPending) return;
+    const id = setInterval(() => void loadFiles(), 3000);
+    return () => clearInterval(id);
+  }, [showFileList, hasPending]);
 
   useEffect(() => {
     if (showFileList) {
@@ -78,14 +129,13 @@ function FileUpload({
 
     uploadInFlightRef.current = true;
     setUploading(true);
+    setUploadProgress(0);
     setMessage("");
 
     let uploaded = false;
 
-    let uploadedFile: FileRecord | null = null;
-
     try {
-      uploadedFile = await uploadFile(selectedFile, description);
+      await uploadFile(selectedFile, description, setUploadProgress);
       uploaded = true;
       setMessage("File uploaded successfully.");
       setSelectedFile(null);
@@ -95,16 +145,17 @@ function FileUpload({
     } finally {
       uploadInFlightRef.current = false;
       setUploading(false);
+      setUploadProgress(null);
     }
 
-    if (!uploaded || !uploadedFile) return;
+    if (!uploaded) return;
 
     if (showFileList) {
       void loadFiles();
     }
 
     try {
-      await onUploadSuccess?.(uploadedFile);
+      await onUploadSuccess?.();
       if (variant === "modal") {
         onClose?.();
       }
@@ -171,6 +222,18 @@ function FileUpload({
         {uploading ? "Uploading..." : "Upload"}
       </button>
 
+      {uploadProgress !== null && (
+        <div className="flex flex-col gap-1">
+          <div className="h-1.5 overflow-hidden rounded-sm bg-slate-500/15">
+            <div
+              className="h-full rounded-sm bg-gradient-to-r from-blue-600 to-blue-400 transition-[width] duration-100"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+          <span className="text-right text-xs text-slate-400">{uploadProgress}%</span>
+        </div>
+      )}
+
       {message && <p className="m-0 text-sm text-blue-300">{message}</p>}
 
       {showFileList && (
@@ -182,7 +245,7 @@ function FileUpload({
             files.map((file) => (
               <div
                 key={file.id}
-                className="grid grid-cols-1 items-center gap-1.5 border-b border-slate-400/15 pb-2 sm:grid-cols-[1fr_auto_auto] sm:gap-2 sm:border-b-0 sm:pb-0"
+                className="grid grid-cols-1 items-center gap-1.5 border-b border-slate-400/15 pb-2 sm:grid-cols-[1fr_auto_auto_auto] sm:gap-2 sm:border-b-0 sm:pb-0"
               >
                 <a
                   href={fileDownloadUrl(file.id)}
@@ -195,7 +258,7 @@ function FileUpload({
                 <span className="text-sm text-slate-300">
                   {Math.round(file.filesize / 1024)} KB
                 </span>
-
+                <StatusBadge status={file.ingestion_status ?? null} />
                 <button
                   type="button"
                   className="cursor-pointer rounded-lg border border-slate-400/30 bg-[#0b1325] px-2 py-1.5 text-sm text-slate-200 hover:bg-slate-800"

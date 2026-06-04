@@ -23,6 +23,7 @@ export type ConversationPayload = {
 };
 
 export type ChatWsEvent =
+  | { type: "ping" }
   | {
       type: "message";
       temp_id: string;
@@ -45,6 +46,7 @@ export type ChatWsEvent =
       temp_id: string;
       user_type: "system";
       statement: string;
+      citations: Citation[];
       chat_id: number;
       id?: number;
       created_at?: string;
@@ -61,6 +63,8 @@ export type LiveMessage = {
   statement: string;
   streaming?: boolean;
   created_at?: string;
+  /** True while waiting for the first chunk — shows typing indicator */
+  pending?: boolean;
 };
 
 export function getChatWebSocketUrl(chatListId: number) {
@@ -146,5 +150,24 @@ export async function editConversationListTitle(list_id: number, title: string) 
     `/conversation/conversation-title/${list_id}`,
     { conversation_title: title }
   );
+  return response.data;
+}
+
+export type Citation = {
+  file_id: number;
+  filename: string;
+  page_start: number | null;
+  page_end: number | null;
+  content_preview: string;
+};
+
+export type AskResponse = {
+  answer: string;
+  citations: Citation[];
+  conversation_id: number;
+};
+
+export async function askQuestion(conversationId: number, question: string) {
+  const response = await api.post<AskResponse>(`/chat/${conversationId}/ask`, { question });
   return response.data;
 }

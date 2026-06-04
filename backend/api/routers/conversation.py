@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -11,12 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.chat_cache import append_stream_chunk, clear_stream
 from core.auth import get_current_user
-from core.config import settings
 from core.database import AsyncSessionLocal
 from core.dependencies import get_db
+from core.llm import get_chat_llm
 from core.websocket import manager
 from models.auth import User, UserRole
-from models.conversation import ConversationList
+from models.conversation import Conversation, ConversationList
 from schema.conversation import (
     ChatWsSendPayload,
     ConversationListCreate,
@@ -25,72 +25,11 @@ from schema.conversation import (
     ConversationTitleUpdate,
 )
 from services import conversation as conversation_service
-from services.messaging import (
-    USER_TYPE_SYSTEM,
-    publish_chat_message,
-)
+from services import rag as rag_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/conversation", tags=["conversation"])
-
-
-async def _stream_system_message(
-    chat_list_id: int,
-    statement: str,
-    temp_id: str,
-    user_type: str,
-    created_at: str,
-) -> None:
-    chunk_size = settings.chat_stream_chunk_size
-    for index in range(0, len(statement), chunk_size):
-        chunk = statement[index : index + chunk_size]
-        await append_stream_chunk(chat_list_id, temp_id, chunk)
-        await manager.broadcast(
-            chat_list_id,
-            {
-                "type": "chunk",
-                "temp_id": temp_id,
-                "user_type": user_type,
-                "chunk": chunk,
-                "chat_id": chat_list_id,
-                "created_at": created_at,
-            },
-        )
-        await asyncio.sleep(0.03)
-
-    await clear_stream(chat_list_id, temp_id)
-
-
-async def _handle_outgoing_message(chat_list_id: int, user_type: str, statement: str) -> str:
-    temp_id = str(uuid4())
-    statement = statement.strip()
-    if not statement:
-        raise HTTPException(status_code=400, detail="Message cannot be empty")
-    created_at = datetime.now(timezone.utc).isoformat()
-
-    if user_type == USER_TYPE_SYSTEM:
-        await _stream_system_message(chat_list_id, statement, temp_id, user_type, created_at)
-
-    await manager.broadcast(
-        chat_list_id,
-        {
-            "type": "message",
-            "temp_id": temp_id,
-            "user_type": user_type,
-            "statement": statement,
-            "chat_id": chat_list_id,
-            "created_at": created_at,
-        },
-    )
-
-    await publish_chat_message(
-        chat_id=chat_list_id,
-        user_type=user_type,
-        statement=statement,
-        temp_id=temp_id,
-    )
-    return temp_id
 
 
 async def _get_owned_convo(db: AsyncSession, convo_id: int, user: User) -> ConversationList:
@@ -205,6 +144,100 @@ async def _redis_listener(channel: str, websocket: WebSocket) -> None:
                 await pubsub.aclose()
 
 
+async def _ws_ping_loop(websocket: WebSocket, interval: int = 25) -> None:
+    """Send application-level pings so proxies don't kill idle connections during long LLM calls."""
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            await websocket.send_text(json.dumps({"type": "ping"}))
+    except (asyncio.CancelledError, Exception):
+        pass
+
+
+async def _handle_rag_stream(
+    websocket: WebSocket,
+    chat_list_id: int,
+    convo: SimpleNamespace,
+    question: str,
+) -> None:
+    """Run the full RAG pipeline for a user question and stream the AI response.
+
+    Phases:
+      1. Retrieve context + build messages (short DB session, released before LLM call)
+      2. Stream LLM tokens — emit chunk events, accumulate in Redis stream cache
+      3. On completion — clear cache, emit done, commit both rows atomically
+    """
+    try:
+        llm = get_chat_llm(temperature=0.2)
+    except RuntimeError:
+        await websocket.send_text(json.dumps({"type": "error", "detail": "LLM unavailable"}))
+        return
+
+    # Phase 1: retrieve — use a short-lived session so the connection returns to pool during LLM call
+    async with AsyncSessionLocal() as db:
+        try:
+            messages, contexts = await rag_service.prepare(question, convo, db)
+        except Exception:
+            logger.exception("RAG prepare failed for chat %s", chat_list_id)
+            await websocket.send_text(json.dumps({"type": "error", "detail": "Failed to retrieve context"}))
+            return
+
+    # Phase 2: stream LLM tokens
+    ai_temp_id = str(uuid4())
+    full_answer = ""
+    gen = llm.astream(messages)
+    try:
+        async for chunk in gen:
+            token: str = chunk.content
+            if not token:
+                continue
+            full_answer += token
+            await append_stream_chunk(chat_list_id, ai_temp_id, token)
+            await manager.broadcast(chat_list_id, {
+                "type": "chunk",
+                "temp_id": ai_temp_id,
+                "user_type": "system",
+                "chunk": token,
+                "chat_id": chat_list_id,
+            })
+    except asyncio.CancelledError:
+        await clear_stream(chat_list_id, ai_temp_id)
+        raise
+    except Exception:
+        logger.exception("LLM stream failed for chat %s", chat_list_id)
+        await clear_stream(chat_list_id, ai_temp_id)
+        with contextlib.suppress(Exception):
+            await websocket.send_text(json.dumps({"type": "error", "detail": "LLM stream failed"}))
+        return
+    finally:
+        if hasattr(gen, "aclose"):
+            await gen.aclose()
+
+    await clear_stream(chat_list_id, ai_temp_id)
+
+    if not full_answer.strip():
+        with contextlib.suppress(Exception):
+            await websocket.send_text(json.dumps({"type": "error", "detail": "Empty response from LLM"}))
+        return
+
+    citations = rag_service.extract_citations(full_answer, contexts)
+
+    await manager.broadcast(chat_list_id, {
+        "type": "done",
+        "temp_id": ai_temp_id,
+        "user_type": "system",
+        "statement": full_answer,
+        "citations": [c.model_dump() for c in citations],
+        "chat_id": chat_list_id,
+    })
+
+    # Phase 3: atomic commit — both rows in one transaction, only after streaming completes
+    async with AsyncSessionLocal() as db:
+        db.add(Conversation(chat_id=chat_list_id, user_type="user", statement=question))
+        db.add(Conversation(chat_id=chat_list_id, user_type="assistant", statement=full_answer))
+        await db.commit()
+
+
 @router.websocket("/ws/{chat_list_id}")
 async def websocket_chat_endpoint(
     websocket: WebSocket,
@@ -212,6 +245,7 @@ async def websocket_chat_endpoint(
 ):
     await websocket.accept()
 
+    # Auth handshake — client sends {"action": "auth", "token": "<jwt>"} as first frame
     try:
         raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
         auth_payload = json.loads(raw)
@@ -223,11 +257,18 @@ async def websocket_chat_endpoint(
         await websocket.close(code=4401)
         return
 
+    # Validate token and ownership, snapshot convo fields before session closes
     async with AsyncSessionLocal() as db:
         try:
             current_user = await get_current_user(token, db)
-            await conversation_service.get_conversation_list_for_user(
+            _convo = await conversation_service.get_conversation_list_for_user(
                 chat_list_id, current_user.id, db
+            )
+            convo = SimpleNamespace(
+                id=_convo.id,
+                conversation_type=_convo.conversation_type,
+                file_id=_convo.file_id,
+                user_id=_convo.user_id,
             )
         except HTTPException:
             await websocket.close(code=4401)
@@ -237,6 +278,8 @@ async def websocket_chat_endpoint(
     listener_task = asyncio.create_task(
         _redis_listener(manager.room_channel(chat_list_id), websocket)
     )
+    ping_task = asyncio.create_task(_ws_ping_loop(websocket))
+
     try:
         while True:
             raw = await websocket.receive_text()
@@ -254,15 +297,26 @@ async def websocket_chat_endpoint(
             if data.action != "send":
                 continue
 
-            await _handle_outgoing_message(
-                chat_list_id,
-                "user",
-                data.statement,
-            )
+            question = data.statement.strip()
+            if not question:
+                continue
+
+            # Broadcast user's message to the room before streaming so other tabs see it immediately
+            await manager.broadcast(chat_list_id, {
+                "type": "message",
+                "temp_id": str(uuid4()),
+                "user_type": "user",
+                "statement": question,
+                "chat_id": chat_list_id,
+            })
+
+            await _handle_rag_stream(websocket, chat_list_id, convo, question)
+
     except WebSocketDisconnect:
-        listener_task.cancel()
-        manager.disconnect(websocket, chat_list_id)
+        pass
     except Exception:
+        logger.exception("Unexpected error in WS handler for chat %s", chat_list_id)
+    finally:
         listener_task.cancel()
+        ping_task.cancel()
         manager.disconnect(websocket, chat_list_id)
-        raise

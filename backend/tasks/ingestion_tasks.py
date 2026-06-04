@@ -16,7 +16,7 @@ except ImportError:
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 try:
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
     from langchain_core.messages import HumanMessage, SystemMessage
 except ImportError:
     RecursiveCharacterTextSplitter = None  # type: ignore[assignment,misc]
@@ -30,6 +30,8 @@ from core.chroma import get_child_chunks_collection, get_document_summaries_coll
 from core.config import settings
 from core.database import SessionLocal
 from core.llm import get_chat_llm, get_embedder
+import models.auth  # noqa: F401 — registers User so SA can resolve files_data.user_id FK
+import models.conversation  # noqa: F401 — registers ConversationList, Conversation
 from models.file_model import FileRecord
 from models.ingestion import DocumentParent, IngestionJob
 
