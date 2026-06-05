@@ -5,12 +5,10 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from passlib.context import CryptContext
 from core.config import settings
 from core.database import SessionLocal
+from core.password import hash_password
 from models.auth import User, UserRole
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 ADMIN_EMAIL = "admin@chatpaper.com"
 
@@ -24,7 +22,8 @@ def seed_admin() -> None:
 
         admin = User(
             email=ADMIN_EMAIL,
-            password=pwd_context.hash(settings.admin_password),
+            name="Admin",
+            password=hash_password(settings.admin_password),
             role=UserRole.admin,
             is_active=True,
         )

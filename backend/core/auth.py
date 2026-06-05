@@ -4,15 +4,13 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import dependencies
 from core.config import settings
+from core.password import verify_password as check_password
 from models.auth import User, UserRole
 from services import auth
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 _USER_CACHE_TTL = settings.access_token_expire_minutes * 60
 
@@ -29,6 +27,7 @@ async def _get_cached_user(user_id: int) -> User | None:
     user = User()
     user.id = data["id"]
     user.email = data["email"]
+    user.name = data.get("name")
     user.role = data["role"]
     user.is_active = data["is_active"]
     user.auth_provider = data["auth_provider"]
@@ -49,6 +48,7 @@ async def _cache_user(user: User) -> None:
     data = {
         "id": user.id,
         "email": user.email,
+        "name": user.name,
         "role": user.role.value if hasattr(user.role, "value") else user.role,
         "is_active": user.is_active,
         "auth_provider": user.auth_provider,
@@ -66,14 +66,12 @@ async def invalidate_user_cache(user_id: int) -> None:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return check_password(plain_password, hashed_password)
 
 
 async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | bool:
     member = await auth.get_user_by_email(db, email)
     if not member:
-        return False
-    if member.auth_provider != "password" or member.password is None:
         return False
     if not verify_password(password, member.password):
         return False

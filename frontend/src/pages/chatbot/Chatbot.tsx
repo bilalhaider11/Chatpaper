@@ -517,6 +517,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
         </nav>
 
         <div className="sidebar-footer">
+          <Link to="/settings" className="sidebar-link">Settings</Link>
           <button type="button" className="sidebar-logout" onClick={logout}>
             <LogoutIcon width={15} height={15} />
             Logout
@@ -528,7 +529,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
         <header className="chatbot-header">
           <div>
             <h1>{activeConversation?.conversation_title ?? "Assistant"}</h1>
-            <span>{user?.email}</span>
+            <span>{user?.name || user?.email}</span>
           </div>
           <div className="chatbot-header-actions">
             {wsStatus === "failed" && (

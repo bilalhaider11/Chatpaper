@@ -7,8 +7,10 @@ const TOKEN_KEY = "auth_token";
 export type User = {
   id: number;
   email: string;
+  name: string | null;
   role: string;
   is_active: boolean;
+  auth_provider?: string;
 };
 
 export const api = axios.create({
@@ -53,17 +55,32 @@ export async function exchangeOAuthCode(code: string) {
   return response.data;
 }
 
-export async function signup(email:string, password:string){
-  const payload = {
-  "email": email,
-  "password": password
+export async function signup(email: string, password: string, name: string) {
+  const response = await api.post("/auth/users", {
+    email,
+    password,
+    name,
+  });
+  return response.data;
 }
-  const response = await api.post(
-    "auth/users",
-    payload
 
-  )
-  return response.data
+export async function fetchAllUsers() {
+  const response = await api.get<User[]>("/auth/users");
+  return response.data;
+}
+
+export async function changeOwnPassword( newPassword: string) {
+  await api.post("/auth/users/me/change-password", {
+    
+    new_password: newPassword,
+  });
+}
+
+export async function changeUserPassword(userId: number, newPassword: string) {
+  const response = await api.post<User>(`/auth/users/${userId}/change-password`, {
+    new_password: newPassword,
+  });
+  return response.data;
 }
 
 export async function fetchCurrentUser() {

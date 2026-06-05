@@ -1,4 +1,4 @@
-declare module "mammoth/mammoth.browser" {
+declare module "mammoth/mammoth.browser.js" {
   interface ConvertResult {
     value: string;
     messages: unknown[];

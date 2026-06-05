@@ -76,6 +76,7 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
     if iss not in ("https://accounts.google.com", "accounts.google.com") or not user_email:
         raise HTTPException(status_code=401, detail="Google authentication failed.")
 
+    google_name = user_info.get("name")
     user_data = await service_auth.get_user_by_email(db, user_email)
     if user_data is None:
         user_data = await service_auth.create_google_user(db, user_email)
