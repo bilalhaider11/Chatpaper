@@ -7,6 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     libmagic1 \
     curl \
+    libxcb1 \
+    libgl1 \
+    libglib2.0-0 \
+    poppler-utils \
+    tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -18,6 +23,10 @@ RUN pip install --no-cache-dir \
 
 # 2. Install rest of dependencies (includes alembic, fastapi, etc.)
 RUN pip install --no-cache-dir --timeout 1000 -r requirements.txt
+
+# 3. Pre-download spaCy model so unstructured doesn't try to install it at
+#    runtime as a non-root user (which fails with PermissionError).
+RUN python -m spacy download en_core_web_sm
 
 COPY . .
 RUN mkdir -p /app/files

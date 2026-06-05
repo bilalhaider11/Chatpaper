@@ -93,7 +93,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
         if (existing) {
           return prev.map((m) =>
             m.tempId === event.temp_id
-              ? { ...m, statement: event.chunk }
+              ? { ...m, statement: m.statement + event.chunk }
               : m
           );
         }
