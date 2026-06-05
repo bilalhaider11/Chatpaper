@@ -21,7 +21,7 @@ Ask    → dense retrieval + BM25 + RRF fusion → GPT-4o-mini → cited answer
 - Celery + Redis (background ingestion tasks)
 - ChromaDB (vector store — 3 collections)
 - OpenAI (embeddings: `text-embedding-3-small`, chat: `gpt-4o-mini`)
-- JWT auth (python-jose + passlib/bcrypt), sqladmin panel
+- JWT auth (python-jose + bcrypt), sqladmin panel
 
 **Frontend**
 - React 19 + TypeScript + Vite (build tooling), served via `serve` in Docker

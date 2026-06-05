@@ -19,7 +19,10 @@ from core.redis_client import stop_redis,start_redis
 import models.ingestion  # noqa: F401 — registers DocumentParent, IngestionJob with Base
 import models.conversation  # noqa: F401 — registers ConversationList, Conversation with Base
 from api.router import api_router
-from .admin import UserAdmin, authentication_backend
+from .admin import (
+    UserAdmin, FileAdmin, IngestionJobAdmin,
+    ConversationListAdmin, MessageAdmin, authentication_backend,
+)
 from services.messaging import start_messaging, stop_messaging
 
 @asynccontextmanager
@@ -68,6 +71,10 @@ app.include_router(api_router)
 # Admin panel — protected by AdminAuth; password hashes are excluded from column_list.
 admin = Admin(app, engine, authentication_backend=authentication_backend)
 admin.add_view(UserAdmin)
+admin.add_view(FileAdmin)
+admin.add_view(IngestionJobAdmin)
+admin.add_view(ConversationListAdmin)
+admin.add_view(MessageAdmin)
 
 
 @app.get("/")

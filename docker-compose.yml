@@ -79,6 +79,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./backend:/app
       - upload_data:/app/files
     depends_on:
       db:
@@ -112,8 +113,9 @@ services:
       UPLOAD_DIR: /app/files
       CHROMA_HOST: chromadb
       CHROMA_PORT: 8000
-    command: ["celery", "-A", "core.celery_app", "worker", "-l", "info", "--concurrency=2"]
+    command: ["watchmedo", "auto-restart", "--directory=.", "--pattern=*.py", "--recursive", "--", "celery", "-A", "core.celery_app", "worker", "-l", "info", "--concurrency=2"]
     volumes:
+      - ./backend:/app
       - upload_data:/app/files
     depends_on:
       backend:
@@ -136,7 +138,9 @@ services:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       CHROMA_HOST: chromadb
       CHROMA_PORT: 8000
-    command: ["celery", "-A", "core.celery_app", "beat", "-l", "info"]
+    command: ["watchmedo", "auto-restart", "--directory=.", "--pattern=*.py", "--recursive", "--", "celery", "-A", "core.celery_app", "beat", "-l", "info"]
+    volumes:
+      - ./backend:/app
     depends_on:
       backend:
         condition: service_healthy
