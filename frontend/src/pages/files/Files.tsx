@@ -101,7 +101,11 @@ function Files({ onLogout }: { onLogout: () => void }) {
     showToast("File deleted");
   };
 
-  const handleUploadSuccess = async () => {
+  const handleUploadSuccess = async (file: FileRecord) => {
+    if (file.conversation_id) {
+      navigate(`/chat/${file.conversation_id}`);
+      return;
+    }
     await loadFiles();
     setShowUpload(false);
   };

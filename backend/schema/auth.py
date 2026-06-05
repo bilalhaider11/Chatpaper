@@ -50,8 +50,8 @@ class UserUpdate(BaseModel):
     name: str | None = None
 
 class ChangePassword(BaseModel):
-    
     new_password: str = Field(min_length=8)
+    user_id: int | None = None
 
     @field_validator("new_password")
     @classmethod

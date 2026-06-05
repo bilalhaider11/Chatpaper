@@ -69,18 +69,11 @@ export async function fetchAllUsers() {
   return response.data;
 }
 
-export async function changeOwnPassword( newPassword: string) {
-  await api.post("/auth/users/me/change-password", {
-    
+export async function changePassword(newPassword: string, userId?: number) {
+  await api.post("/auth/change-password", {
     new_password: newPassword,
+    ...(userId !== undefined ? { user_id: userId } : {}),
   });
-}
-
-export async function changeUserPassword(userId: number, newPassword: string) {
-  const response = await api.post<User>(`/auth/users/${userId}/change-password`, {
-    new_password: newPassword,
-  });
-  return response.data;
 }
 
 export async function fetchCurrentUser() {

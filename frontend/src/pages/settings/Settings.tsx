@@ -2,8 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import logo from "../../assets/logo.png";
 import {
-  changeOwnPassword,
-  changeUserPassword,
+  changePassword,
   fetchAllUsers,
   fetchCurrentUser,
   tokenStore,
@@ -91,7 +90,7 @@ function Settings({ onLogout }: SettingsProps) {
 
     setSubmitting(true);
     try {
-      await changeOwnPassword( newPassword);
+      await changePassword(newPassword);
       setSuccess("Password updated successfully.");
       resetForm();
     } catch (err: unknown) {
@@ -111,7 +110,7 @@ function Settings({ onLogout }: SettingsProps) {
 
     setSubmitting(true);
     try {
-      await changeUserPassword(selectedUserId, newPassword);
+      await changePassword(newPassword, selectedUserId);
       setSuccess(`Password updated for ${selectedUser?.name || selectedUser?.email}.`);
       setNewPassword("");
       setConfirmPassword("");

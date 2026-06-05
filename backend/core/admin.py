@@ -7,6 +7,9 @@ from starlette.requests import Request
 from core.config import settings
 from core.redis_client import get_redis
 from models.auth import User
+from models.conversation import Conversation, ConversationList
+from models.file_model import FileRecord
+from models.ingestion import DocumentParent, IngestionJob
 
 _MAX_ADMIN_FAILS = 10
 _LOCKOUT_SECONDS = 300  # 5-minute window
@@ -64,3 +67,50 @@ authentication_backend = AdminAuth(secret_key=settings.secret_key)
 
 class UserAdmin(ModelView, model=User):
     column_list = [User.id, User.email, User.role, User.is_active, User.created_at, User.updated_at]
+    column_searchable_list = [User.email]
+    column_sortable_list = [User.id, User.created_at, User.role]
+
+
+class FileAdmin(ModelView, model=FileRecord):
+    column_list = [
+        FileRecord.id, FileRecord.user_id, FileRecord.filename, FileRecord.file_type,
+        FileRecord.filesize, FileRecord.ingestion_status, FileRecord.is_active,
+        FileRecord.total_pages, FileRecord.uploaded_at,
+    ]
+    column_searchable_list = [FileRecord.filename]
+    column_sortable_list = [FileRecord.id, FileRecord.uploaded_at, FileRecord.ingestion_status]
+    # Exclude raw file path from list to avoid accidental exposure
+    column_details_exclude_list = [FileRecord.filepath]
+
+
+class IngestionJobAdmin(ModelView, model=IngestionJob):
+    column_list = [
+        IngestionJob.id, IngestionJob.file_id, IngestionJob.status,
+        IngestionJob.current_stage, IngestionJob.total_stages,
+        IngestionJob.retry_count, IngestionJob.error_type,
+        IngestionJob.started_at, IngestionJob.completed_at,
+    ]
+    column_sortable_list = [IngestionJob.id, IngestionJob.status, IngestionJob.started_at]
+    column_details_exclude_list = [IngestionJob.error_message]  # shown in detail view only
+
+
+class ConversationListAdmin(ModelView, model=ConversationList):
+    name = "Conversation"
+    name_plural = "Conversations"
+    column_list = [
+        ConversationList.id, ConversationList.user_id, ConversationList.conversation_title,
+        ConversationList.conversation_type, ConversationList.file_id,
+        ConversationList.is_active, ConversationList.created_at,
+    ]
+    column_searchable_list = [ConversationList.conversation_title]
+    column_sortable_list = [ConversationList.id, ConversationList.created_at, ConversationList.conversation_type]
+
+
+class MessageAdmin(ModelView, model=Conversation):
+    name = "Message"
+    name_plural = "Messages"
+    column_list = [
+        Conversation.id, Conversation.chat_id, Conversation.user_type,
+        Conversation.statement, Conversation.created_at,
+    ]
+    column_sortable_list = [Conversation.id, Conversation.created_at, Conversation.user_type]

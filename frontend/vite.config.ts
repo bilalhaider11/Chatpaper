@@ -9,4 +9,5 @@ export default defineConfig({
       "mammoth/mammoth.browser": "mammoth/mammoth.browser.js",
     },
   },
+  server: { host: true },
 })

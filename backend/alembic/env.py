@@ -1,6 +1,6 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
+from sqlalchemy import engine_from_config, text
 from sqlalchemy import pool
 
 from alembic import context
@@ -73,6 +73,32 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        # Alembic's default alembic_version uses VARCHAR(32) which is too
+        # narrow for our descriptive revision IDs (up to 41 chars).
+        # Pre-create with the right width on fresh DBs, or widen existing ones.
+        connection.execute(text("""
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_name = 'alembic_version'
+                ) THEN
+                    CREATE TABLE alembic_version (
+                        version_num VARCHAR(128) NOT NULL,
+                        CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+                    );
+                ELSIF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'alembic_version'
+                    AND column_name = 'version_num'
+                    AND character_maximum_length < 128
+                ) THEN
+                    ALTER TABLE alembic_version
+                        ALTER COLUMN version_num TYPE VARCHAR(128);
+                END IF;
+            END $$
+        """))
+        connection.commit()
+
         context.configure(
             connection=connection, target_metadata=target_metadata
         )

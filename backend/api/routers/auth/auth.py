@@ -92,28 +92,14 @@ async def update_user(
     return await auth_service.update_user(db, user_id, user)
 
 
-@router.post("/users/me/change-password", status_code=status.HTTP_204_NO_CONTENT)
-async def change_own_password(
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
     request: Request,
     payload: schema_auth.ChangePassword,
     current_user: Annotated[User, Depends(auth_functions.get_current_user)],
     db: AsyncSession = Depends(get_db),
 ):
-    return await auth_service.change_own_password(db, current_user, payload)
-
-
-@router.post(
-    "/users/{user_id}/change-password",
-    response_model=schema_auth.User,
-    dependencies=[Depends(RoleChecker(["admin"]))],
-)
-async def change_user_password(
-    request: Request,
-    user_id: int,
-    payload: schema_auth.ChangePassword,
-    db: AsyncSession = Depends(get_db),
-):
-    return await auth_service.change_user_password(db, user_id, payload)
+    return await auth_service.change_password(db, current_user, payload)
 
 
 @router.delete(

@@ -141,7 +141,13 @@ function Home({ onLogout }: HomeProps) {
         <FileUpload
           variant="modal"
           onClose={() => setShowUpload(false)}
-          onUploadSuccess={(file) => setPanel({ kind: "tracking", file })}
+          onUploadSuccess={(file) => {
+            if (file.conversation_id) {
+              navigate(`/chat/${file.conversation_id}`);
+            } else {
+              setPanel({ kind: "tracking", file });
+            }
+          }}
         />
       )}
 

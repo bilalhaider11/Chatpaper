@@ -2,7 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update
-from core.password import hash_password, verify_password
+from core.password import hash_password
 from models.auth import User
 from schema import auth as schema_auth
 
@@ -23,11 +23,10 @@ async def get_user_by_id(db: AsyncSession, user_id: int) -> User:
 
 
 async def create_new_user(db: AsyncSession, user: schema_auth.UserCreate) -> User:
-    hashed_password = hash_password(user.password)
     new_user = User(
         email=user.email,
+        password=hash_password(user.password),
         name=user.name,
-        password=hashed_password,
         auth_provider="password",
     )
     db.add(new_user)
@@ -64,36 +63,31 @@ async def update_user(db: AsyncSession, user_id: int, user: schema_auth.UserUpda
 
 
 
-async def change_own_password(
+async def change_password(
     db: AsyncSession,
-    user: User,
+    current_user: User,
     payload: schema_auth.ChangePassword,
-):
+) -> None:
+    target_user_id = payload.user_id if payload.user_id is not None else current_user.id
+
+    if target_user_id != current_user.id:
+        role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
+        if role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Not authorized to change this user's password",
+            )
+
+    await get_user_by_id(db, target_user_id)
     await db.execute(
         update(User)
-        .where(User.id == user.id)
+        .where(User.id == target_user_id)
         .values(password=hash_password(payload.new_password))
     )
-
     await db.commit()
 
     from core.auth import invalidate_user_cache
-    await invalidate_user_cache(user.id)
-  
-async def change_user_password(
-    db: AsyncSession,
-    user_id: int,
-    payload: schema_auth.ChangePassword,
-) -> User:
-    db_user = await get_user_by_id(db, user_id)
-    db_user.password = hash_password(payload.new_password)
-
-    await db.commit()
-    await db.refresh(db_user)
-    from core.auth import invalidate_user_cache
-
-    await invalidate_user_cache(user_id)
-    return db_user
+    await invalidate_user_cache(target_user_id)
 
 async def delete_user(db: AsyncSession, user_id: int) -> dict:
     db_user = await get_user_by_id(db, user_id)
