@@ -1,8 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
-
-import bcrypt as _bcrypt
+from core.password import verify_password
 from fastapi import Depends, HTTPException, status
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,10 +62,6 @@ async def invalidate_user_cache(user_id: int) -> None:
     redis = get_redis()
     if redis is not None:
         await redis.delete(f"user:cache:{user_id}")
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return _bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
 
 async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | bool:
