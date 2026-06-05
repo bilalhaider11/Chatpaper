@@ -6,9 +6,11 @@ import {
   fetchAllUsers,
   fetchCurrentUser,
   tokenStore,
+  updateName,
   User,
 } from "../../api/axios";
 import { LogoutIcon } from "../../components/icons/Icons";
+import { isValidName, NAME_REQUIREMENTS, normalizeName } from "../../utils/nameValidation";
 import { isValidPassword, PASSWORD_REQUIREMENTS } from "../../utils/passwordValidation";
 import "./Settings.css";
 
@@ -22,15 +24,26 @@ function Settings({ onLogout }: SettingsProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [profileError, setProfileError] = useState("");
+  const [profileSuccess, setProfileSuccess] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSuccess, setPasswordSuccess] = useState("");
+  const [adminError, setAdminError] = useState("");
+  const [adminSuccess, setAdminSuccess] = useState("");
+  const [profileName, setProfileName] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [nameSubmitting, setNameSubmitting] = useState(false);
 
   const isAdmin = user?.role === "admin";
   const selectedUser = users.find((item) => item.id === selectedUserId) ?? null;
+  const isChangingOwnAccount = selectedUserId === user?.id;
+  const isGoogleAuth = (authProvider?: string) => authProvider === "google";
+  const requiresCurrentPassword = !isGoogleAuth(user?.auth_provider);
+  const adminRequiresCurrentPassword =
+    isChangingOwnAccount && !isGoogleAuth(selectedUser?.auth_provider ?? user?.auth_provider);
 
   useEffect(() => {
     const load = async () => {
@@ -42,6 +55,7 @@ function Settings({ onLogout }: SettingsProps) {
       try {
         const currentUser = await fetchCurrentUser();
         setUser(currentUser);
+        setProfileName(currentUser.name ?? "");
         if (currentUser.role === "admin") {
           const allUsers = await fetchAllUsers();
           setUsers(allUsers);
@@ -57,45 +71,111 @@ function Settings({ onLogout }: SettingsProps) {
     void load();
   }, [navigate, onLogout]);
 
-  const resetForm = () => {
+  const resetPasswordForm = () => {
     setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
-    setError("");
-    setSuccess("");
+    setPasswordError("");
+    setPasswordSuccess("");
   };
 
   const handleSelectUser = (userId: number) => {
+    const selected = users.find((item) => item.id === userId);
     setSelectedUserId(userId);
-    resetForm();
+    setProfileName(selected?.name ?? "");
+    resetPasswordForm();
+    setAdminError("");
+    setAdminSuccess("");
   };
 
-  const validateNewPasswords = () => {
-    if (!isValidPassword(newPassword)) {
-      setError(PASSWORD_REQUIREMENTS);
-      return false;
+  const getErrorMessage = (err: unknown, fallback: string) => {
+    const detail = (err as { response?: { data?: { detail?: string | Array<{ msg?: string }> } } })
+      ?.response?.data?.detail;
+    if (Array.isArray(detail)) {
+      return detail.map((item) => item?.msg ?? fallback).join(" ");
     }
-    if (newPassword !== confirmPassword) {
-      setError("New password and confirm password do not match.");
-      return false;
+    return typeof detail === "string" ? detail : fallback;
+  };
+
+  const handleOwnNameUpdate = async (event: FormEvent) => {
+    event.preventDefault();
+    setProfileError("");
+    setProfileSuccess("");
+
+    if (!isValidName(profileName)) {
+      setProfileError(NAME_REQUIREMENTS);
+      return;
     }
-    return true;
+    const trimmedName = normalizeName(profileName);
+
+    setNameSubmitting(true);
+    try {
+      const updated = await updateName(trimmedName);
+      setUser(updated);
+      setProfileName(updated.name ?? trimmedName);
+      setProfileSuccess("Name updated successfully.");
+    } catch (err: unknown) {
+      setProfileError(getErrorMessage(err, "Could not update name."));
+    } finally {
+      setNameSubmitting(false);
+    }
+  };
+
+  const handleAdminNameUpdate = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedUserId) return;
+    setAdminError("");
+    setAdminSuccess("");
+
+    if (!isValidName(profileName)) {
+      setAdminError(NAME_REQUIREMENTS);
+      return;
+    }
+    const trimmedName = normalizeName(profileName);
+
+    setNameSubmitting(true);
+    try {
+      const updated = await updateName(trimmedName, selectedUserId);
+      setUsers((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setProfileName(updated.name ?? trimmedName);
+      setAdminSuccess(`Name updated for ${updated.name || updated.email}.`);
+    } catch (err: unknown) {
+      setAdminError(getErrorMessage(err, "Could not update name."));
+    } finally {
+      setNameSubmitting(false);
+    }
   };
 
   const handleOwnPasswordChange = async (event: FormEvent) => {
     event.preventDefault();
-    setError("");
-    setSuccess("");
-    if (!validateNewPasswords()) return;
+    setPasswordError("");
+    setPasswordSuccess("");
+
+    if (requiresCurrentPassword && !currentPassword) {
+      setPasswordError("Current password is required.");
+      return;
+    }
+    if (!isValidPassword(newPassword)) {
+      setPasswordError(PASSWORD_REQUIREMENTS);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError("New password and confirm password do not match.");
+      return;
+    }
 
     setSubmitting(true);
     try {
-      await changePassword(newPassword);
-      setSuccess("Password updated successfully.");
-      resetForm();
+      await changePassword(newPassword, {
+        ...(requiresCurrentPassword ? { currentPassword } : {}),
+      });
+      if (isGoogleAuth(user?.auth_provider)) {
+        setUser((prev) => (prev ? { ...prev, auth_provider: "password" } : prev));
+      }
+      setPasswordSuccess("Password updated successfully.");
+      resetPasswordForm();
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(typeof detail === "string" ? detail : "Could not update password.");
+      setPasswordError(getErrorMessage(err, "Could not update password."));
     } finally {
       setSubmitting(false);
     }
@@ -104,23 +184,43 @@ function Settings({ onLogout }: SettingsProps) {
   const handleAdminPasswordChange = async (event: FormEvent) => {
     event.preventDefault();
     if (!selectedUserId) return;
-    setError("");
-    setSuccess("");
-    if (!validateNewPasswords()) return;
+    setAdminError("");
+    setAdminSuccess("");
+    if (!isValidPassword(newPassword)) {
+      setAdminError(PASSWORD_REQUIREMENTS);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setAdminError("New password and confirm password do not match.");
+      return;
+    }
+    if (adminRequiresCurrentPassword && !currentPassword) {
+      setAdminError("Current password is required.");
+      return;
+    }
 
     setSubmitting(true);
     try {
-      await changePassword(newPassword, selectedUserId);
-      setSuccess(`Password updated for ${selectedUser?.name || selectedUser?.email}.`);
+      await changePassword(newPassword, {
+        userId: selectedUserId,
+        ...(adminRequiresCurrentPassword ? { currentPassword } : {}),
+      });
+      if (isGoogleAuth(selectedUser?.auth_provider)) {
+        setUsers((prev) =>
+          prev.map((item) =>
+            item.id === selectedUserId ? { ...item, auth_provider: "password" } : item
+          )
+        );
+        if (isChangingOwnAccount) {
+          setUser((prev) => (prev ? { ...prev, auth_provider: "password" } : prev));
+        }
+      }
+      setAdminSuccess(`Password updated for ${selectedUser?.name || selectedUser?.email}.`);
+      setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      if (Array.isArray(detail)) {
-        setError(detail.map((item) => item?.msg ?? "Invalid password.").join(" "));
-      } else {
-        setError(typeof detail === "string" ? detail : "Could not update password.");
-      }
+      setAdminError(getErrorMessage(err, "Could not update password."));
     } finally {
       setSubmitting(false);
     }
@@ -165,8 +265,8 @@ function Settings({ onLogout }: SettingsProps) {
 
         {isAdmin ? (
           <section className="settings-panel">
-            <h2>User passwords</h2>
-            <p className="settings-panel-subtitle">Select a user to set a new password.</p>
+            <h2>Manage users</h2>
+            <p className="settings-panel-subtitle">Select a user to update their name or password.</p>
             <div className="settings-admin-layout">
               <div className="settings-user-list">
                 {users.map((item) => (
@@ -184,88 +284,149 @@ function Settings({ onLogout }: SettingsProps) {
 
               <div className="settings-form-card">
                 {selectedUser ? (
-                  <form onSubmit={(event) => void handleAdminPasswordChange(event)}>
-                    <h3>Change password for {selectedUser.name || selectedUser.email}</h3>
-                    <label className="settings-label">
-                      New password
-                      <input
-                        type="password"
-                        className="settings-input"
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        required
-                        autoComplete="new-password"
-                      />
-                    </label>
-                    <label className="settings-label">
-                      Confirm new password
-                      <input
-                        type="password"
-                        className="settings-input"
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        required
-                        autoComplete="new-password"
-                      />
-                    </label>
-                    <p className="settings-hint">{PASSWORD_REQUIREMENTS}</p>
-                    {error && <p className="settings-error">{error}</p>}
-                    {success && <p className="settings-success">{success}</p>}
-                    <button type="submit" className="settings-submit" disabled={submitting}>
-                      {submitting ? "Saving…" : "Update password"}
-                    </button>
-                  </form>
+                  <>
+                    <form onSubmit={(event) => void handleAdminNameUpdate(event)}>
+                      <h3>Update name for {selectedUser.name || selectedUser.email}</h3>
+                      <label className="settings-label">
+                        Name
+                        <input
+                          type="text"
+                          className="settings-input"
+                          value={profileName}
+                          onChange={(e) => setProfileName(e.target.value)}
+                          required
+                          autoComplete="name"
+                        />
+                      </label>
+                      <p className="settings-hint">{NAME_REQUIREMENTS}</p>
+                      <button type="submit" className="settings-submit" disabled={nameSubmitting}>
+                        {nameSubmitting ? "Saving…" : "Update name"}
+                      </button>
+                    </form>
+
+                    <form className="settings-password-form" onSubmit={(event) => void handleAdminPasswordChange(event)}>
+                      <h3>Change password for {selectedUser.name || selectedUser.email}</h3>
+                      {adminRequiresCurrentPassword && (
+                        <label className="settings-label">
+                          Current password
+                          <input
+                            type="password"
+                            className="settings-input"
+                            value={currentPassword}
+                            onChange={(e) => setCurrentPassword(e.target.value)}
+                            required
+                            autoComplete="current-password"
+                          />
+                        </label>
+                      )}
+                      <label className="settings-label">
+                        New password
+                        <input
+                          type="password"
+                          className="settings-input"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          required
+                          autoComplete="new-password"
+                        />
+                      </label>
+                      <label className="settings-label">
+                        Confirm new password
+                        <input
+                          type="password"
+                          className="settings-input"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          required
+                          autoComplete="new-password"
+                        />
+                      </label>
+                      <p className="settings-hint">{PASSWORD_REQUIREMENTS}</p>
+                      <button type="submit" className="settings-submit" disabled={submitting}>
+                        {submitting ? "Saving…" : "Update password"}
+                      </button>
+                    </form>
+                  </>
                 ) : (
                   <p className="settings-empty">Select a user from the list.</p>
                 )}
+                {adminError && <p className="settings-error">{adminError}</p>}
+                {adminSuccess && <p className="settings-success">{adminSuccess}</p>}
               </div>
             </div>
           </section>
         ) : (
-          <section className="settings-panel">
-            <h2>Change password</h2>
-            <form className="settings-form-card" onSubmit={(event) => void handleOwnPasswordChange(event)}>
-              {/*<label className="settings-label">
-                Current password
-                <input
-                  type="password"
-                  className="settings-input"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  required
-                  autoComplete="current-password"
-                />
-              </label>*/}
-              <label className="settings-label">
-                New password
-                <input
-                  type="password"
-                  className="settings-input"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  required
-                  autoComplete="new-password"
-                />
-              </label>
-              <label className="settings-label">
-                Confirm new password
-                <input
-                  type="password"
-                  className="settings-input"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                  autoComplete="new-password"
-                />
-              </label>
-              <p className="settings-hint">{PASSWORD_REQUIREMENTS}</p>
-              {error && <p className="settings-error">{error}</p>}
-              {success && <p className="settings-success">{success}</p>}
-              <button type="submit" className="settings-submit" disabled={submitting}>
-                {submitting ? "Saving…" : "Update password"}
-              </button>
-            </form>
-          </section>
+          <>
+            <section className="settings-panel">
+              <h2>Profile</h2>
+              <form className="settings-form-card" onSubmit={(event) => void handleOwnNameUpdate(event)}>
+                <label className="settings-label">
+                  Name
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    required
+                    autoComplete="name"
+                  />
+                </label>
+                <p className="settings-hint">{NAME_REQUIREMENTS}</p>
+                {profileError && <p className="settings-error">{profileError}</p>}
+                {profileSuccess && <p className="settings-success">{profileSuccess}</p>}
+                <button type="submit" className="settings-submit" disabled={nameSubmitting}>
+                  {nameSubmitting ? "Saving…" : "Update name"}
+                </button>
+              </form>
+            </section>
+
+            <section className="settings-panel">
+              <h2>Change password</h2>
+              <form className="settings-form-card" onSubmit={(event) => void handleOwnPasswordChange(event)}>
+                {requiresCurrentPassword && (
+                  <label className="settings-label">
+                    Current password
+                    <input
+                      type="password"
+                      className="settings-input"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      required
+                      autoComplete="current-password"
+                    />
+                  </label>
+                )}
+                <label className="settings-label">
+                  New password
+                  <input
+                    type="password"
+                    className="settings-input"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                    autoComplete="new-password"
+                  />
+                </label>
+                <label className="settings-label">
+                  Confirm new password
+                  <input
+                    type="password"
+                    className="settings-input"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                    autoComplete="new-password"
+                  />
+                </label>
+                <p className="settings-hint">{PASSWORD_REQUIREMENTS}</p>
+                {passwordError && <p className="settings-error">{passwordError}</p>}
+                {passwordSuccess && <p className="settings-success">{passwordSuccess}</p>}
+                <button type="submit" className="settings-submit" disabled={submitting}>
+                  {submitting ? "Saving…" : "Update password"}
+                </button>
+              </form>
+            </section>
+          </>
         )}
       </main>
     </div>

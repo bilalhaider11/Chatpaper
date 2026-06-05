@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from core.name_validation import validate_name as validate_name_format
 from core.password_validation import validate_password_strength
 from models import auth
 
@@ -23,10 +24,7 @@ class UserCreate(UserBase):
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: str) -> str:
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("Name cannot be empty.")
-        return trimmed
+        return validate_name_format(value)
 
 
 class UserLogin(UserBase):
@@ -49,15 +47,34 @@ class UserUpdate(BaseModel):
     password: str | None = None
     name: str | None = None
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return validate_name_format(value)
+
+
 class ChangePassword(BaseModel):
     new_password: str = Field(min_length=8)
+    current_password: str | None = None
     user_id: int | None = None
 
     @field_validator("new_password")
     @classmethod
     def validate_new_password(cls, value: str) -> str:
         return validate_password_strength(value)
-    
+
+
+class UpdateName(BaseModel):
+    name: str
+    user_id: int | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return validate_name_format(value)
+
 
 
 class Token(BaseModel):

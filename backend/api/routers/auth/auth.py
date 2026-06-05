@@ -81,17 +81,6 @@ async def read_user_by_id(user_id: int, db: AsyncSession = Depends(get_db)):
     return await auth_service.get_user_by_id(db, user_id)
 
 
-@router.patch(
-    "/users/{user_id}",
-    response_model=schema_auth.User,
-    dependencies=[Depends(RoleChecker(["admin"]))],
-)
-async def update_user(
-    user_id: int, user: schema_auth.UserUpdate, db: AsyncSession = Depends(get_db)
-):
-    return await auth_service.update_user(db, user_id, user)
-
-
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
     request: Request,
@@ -100,6 +89,16 @@ async def change_password(
     db: AsyncSession = Depends(get_db),
 ):
     return await auth_service.change_password(db, current_user, payload)
+
+
+@router.patch("/update-name", response_model=schema_auth.User)
+async def update_name(
+    request: Request,
+    payload: schema_auth.UpdateName,
+    current_user: Annotated[User, Depends(auth_functions.get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    return await auth_service.update_name(db, current_user, payload)
 
 
 @router.delete(

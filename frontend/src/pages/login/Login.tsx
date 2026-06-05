@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { exchangeOAuthCode, login, signup, tokenStore } from "../../api/axios";
 import { GoogleAuthButton } from "../../components/login/google_auth";
+import { isValidName, NAME_REQUIREMENTS, normalizeName } from "../../utils/nameValidation";
 import { isValidPassword, PASSWORD_REQUIREMENTS } from "../../utils/passwordValidation";
 import logo from "../../assets/logo.png";
 import "./Login.css";
@@ -49,8 +50,8 @@ function Login({ onLoginSuccess }: LoginProps) {
     const isSignup = mode === "signup";
 
     if (isSignup) {
-      if (!name.trim()) {
-        setError("Name is required.");
+      if (!isValidName(name)) {
+        setError(NAME_REQUIREMENTS);
         return;
       }
       if (!isValidPassword(password)) {
@@ -63,7 +64,7 @@ function Login({ onLoginSuccess }: LoginProps) {
 
     try {
       if (isSignup) {
-        await signup(email, password, name.trim());
+        await signup(email, password, normalizeName(name));
       }
       const login_res = await login(email, password);
       tokenStore.setToken(login_res.access_token);
@@ -154,7 +155,12 @@ function Login({ onLoginSuccess }: LoginProps) {
             required
             autoComplete={isLogin ? "current-password" : "new-password"}
           />
-          {!isLogin && <p className="login-hint">{PASSWORD_REQUIREMENTS}</p>}
+          {!isLogin && (
+            <>
+              <p className="login-hint">{NAME_REQUIREMENTS}</p>
+              <p className="login-hint">{PASSWORD_REQUIREMENTS}</p>
+            </>
+          )}
         </div>
 
         {error && <p className="login-error">{error}</p>}

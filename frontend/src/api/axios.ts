@@ -69,11 +69,23 @@ export async function fetchAllUsers() {
   return response.data;
 }
 
-export async function changePassword(newPassword: string, userId?: number) {
+export async function changePassword(
+  newPassword: string,
+  options?: { currentPassword?: string; userId?: number }
+) {
   await api.post("/auth/change-password", {
     new_password: newPassword,
+    ...(options?.currentPassword ? { current_password: options.currentPassword } : {}),
+    ...(options?.userId !== undefined ? { user_id: options.userId } : {}),
+  });
+}
+
+export async function updateName(name: string, userId?: number) {
+  const response = await api.patch<User>("/auth/update-name", {
+    name,
     ...(userId !== undefined ? { user_id: userId } : {}),
   });
+  return response.data;
 }
 
 export async function fetchCurrentUser() {
