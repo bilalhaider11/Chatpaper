@@ -2,17 +2,15 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
+import bcrypt as _bcrypt
 from fastapi import Depends, HTTPException, status
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import dependencies
 from core.config import settings
 from models.auth import User, UserRole
 from services import auth
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 _USER_CACHE_TTL = settings.access_token_expire_minutes * 60
 
@@ -66,7 +64,7 @@ async def invalidate_user_cache(user_id: int) -> None:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return _bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
 
 async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | bool:

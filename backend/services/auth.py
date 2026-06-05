@@ -1,12 +1,10 @@
+import bcrypt as _bcrypt
 from fastapi import HTTPException
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.auth import User
 from schema import auth as schema_auth
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
@@ -25,7 +23,7 @@ async def get_user_by_id(db: AsyncSession, user_id: int) -> User:
 
 
 async def create_new_user(db: AsyncSession, user: schema_auth.UserCreate) -> User:
-    hashed_password = pwd_context.hash(user.password)
+    hashed_password = _bcrypt.hashpw(user.password.encode(), _bcrypt.gensalt()).decode()
     new_user = User(email=user.email, password=hashed_password, auth_provider="password")
     db.add(new_user)
     await db.commit()
@@ -51,7 +49,7 @@ async def update_user(db: AsyncSession, user_id: int, user: schema_auth.UserUpda
     updated_data = user.model_dump(exclude_unset=True)
     for key, value in updated_data.items():
         if key == "password":
-            value = pwd_context.hash(value)
+            value = _bcrypt.hashpw(value.encode(), _bcrypt.gensalt()).decode()
         setattr(db_user, key, value)
     db.add(db_user)
     await db.commit()

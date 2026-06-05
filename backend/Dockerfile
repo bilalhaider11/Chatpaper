@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     libmagic1 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -22,7 +23,10 @@ COPY . .
 RUN mkdir -p /app/files
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh \
+    && adduser --disabled-password --gecos "" appuser \
+    && chown -R appuser:appuser /app /docker-entrypoint.sh
+USER appuser
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000

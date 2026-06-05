@@ -24,12 +24,55 @@ Ask    → dense retrieval + BM25 + RRF fusion → GPT-4o-mini → cited answer
 - JWT auth (python-jose + passlib/bcrypt), sqladmin panel
 
 **Frontend**
-- React 19 + TypeScript + Vite
+- React 19 + TypeScript + Vite (build tooling), served via `serve` in Docker
 - Redux Toolkit, React Router DOM, Tailwind CSS, Axios
 
 ---
 
-## Prerequisites
+## Quick Start with Docker
+
+Docker Compose runs the full stack — PostgreSQL, Redis, RabbitMQ, ChromaDB, FastAPI backend, Celery worker, Celery Beat scheduler, and the React frontend — with a single command.
+
+### 1. Copy and fill in secrets
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Edit `backend/.env` and set at minimum:
+
+```env
+SECRET_KEY=   # python -c "import secrets; print(secrets.token_hex(32))"
+OPENAI_API_KEY=sk-...
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=changeme
+```
+
+### 2. Start the stack
+
+```bash
+docker compose up --build
+```
+
+The first build takes several minutes (Python/torch dependencies). Subsequent starts are fast.
+
+### 3. Service URLs (Docker)
+
+| Service | URL / Connection |
+|---|---|
+| Frontend | http://localhost:5173 |
+| Backend API | http://localhost:8000 |
+| Swagger / API docs | http://localhost:8000/docs |
+| Admin panel | http://localhost:8000/admin |
+| RabbitMQ management | http://localhost:15673 |
+| Flower (Celery monitor) | http://localhost:5555 |
+| ChromaDB API | http://localhost:8001 |
+| PostgreSQL (pgAdmin) | host `localhost`, port `5434`, db `chatpaper`, user `postgres`, password `postgres` |
+| Redis (RedisInsight) | host `localhost`, port `6380` |
+
+---
+
+## Prerequisites (local development)
 
 | Service | Version | Notes |
 |---|---|---|
@@ -42,7 +85,7 @@ Ask    → dense retrieval + BM25 + RRF fusion → GPT-4o-mini → cited answer
 
 ---
 
-## Quick Start
+## Quick Start (local development)
 
 ### 1. Start external services
 
@@ -101,7 +144,7 @@ cd frontend && npm run dev
 
 ---
 
-## Service URLs
+## Service URLs (local development)
 
 | Service | URL |
 |---|---|

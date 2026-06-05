@@ -8,9 +8,10 @@ This document covers the system architecture, component design, patterns to foll
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Browser  (React 19 + Redux + Tailwind)                      │
+│  Browser  (React 19 + TypeScript)                            │
+│  served by `serve` static server (Docker) / Vite dev (local) │
 └────────────────────────┬─────────────────────────────────────┘
-                         │ HTTPS / JWT Bearer
+                         │ HTTP / JWT Bearer
 ┌────────────────────────▼─────────────────────────────────────┐
 │  FastAPI  (uvicorn)                                           │
 │  /api/auth  /api/files  /api/conversation  /api/chat         │
@@ -28,7 +29,31 @@ This document covers the system architecture, component design, patterns to foll
                                   │  document_summaries         │
         Redis ◄───────────────────┤  propositions               │
         (broker + results)        └─────────────────────────────┘
+
+        RabbitMQ  ←── messaging / event bus (chat flush)
+        Celery Beat ←── scheduled cleanup (every 15 min)
 ```
+
+### Docker Compose service topology
+
+```
+db ──────────────────┐
+redis ───────────────┤
+rabbitmq ────────────┤──► backend (healthy) ──► celery_worker
+chromadb ────────────┘──────────────────────► celery_beat
+                                             ──► flower (:5555)
+                                frontend (serve static build)
+```
+
+| Service | Host port | Purpose |
+|---|---|---|
+| backend | 8000 | FastAPI / uvicorn |
+| frontend | 5173 | React SPA via `serve` |
+| db | 5434 | PostgreSQL (host-side; internal traffic uses `db:5432`) |
+| redis | 6380 | Redis (host-side; internal traffic uses `redis:6379`) |
+| rabbitmq | 5673 / 15673 | AMQP / management UI |
+| chromadb | 8001 | ChromaDB HTTP API |
+| flower | 5555 | Celery task monitor |
 
 ---
 
@@ -60,7 +85,7 @@ Chatpaper/
 │   ├── services/                    # Business logic layer (called by routers)
 │   ├── tasks/
 │   │   └── ingestion_tasks.py       # Celery task — 7-stage ingestion pipeline
-│   ├── alembic/versions/            # Migration files (0001–0009)
+│   ├── alembic/versions/            # Migration files (0001–0014)
 │   ├── tests/                       # pytest test suite
 │   └── requirements.txt
 └── frontend/                        # React SPA
@@ -78,7 +103,7 @@ All environment variables are declared as fields on the Pydantic `Settings` clas
 
 ### Authentication (`core/auth.py` + `services/auth.py`)
 
-- Passwords hashed with bcrypt via `passlib`. `verify_password` and `authenticate_user` live in `core/auth.py`.
+- Passwords hashed with `bcrypt` directly (`bcrypt.hashpw` / `bcrypt.checkpw`). `verify_password` and `authenticate_user` live in `core/auth.py`.
 - Tokens are HS256-signed JWTs containing `{id, email, role}`. `create_access_token` appends an `exp` claim.
 - `get_current_user` is a FastAPI dependency: decodes the token, looks up the user by email, raises HTTP 401 on any failure.
 - RBAC is enforced by `models/check_role.py` `RoleChecker` — a dependency class that raises HTTP 403 if the user's role is not in the allowed set.
