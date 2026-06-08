@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { exchangeOAuthCode, login, signup, tokenStore } from "../../api/axios";
 import { GoogleAuthButton } from "../../components/login/google_auth";
-import { isValidName, NAME_REQUIREMENTS, normalizeName } from "../../utils/nameValidation";
-import { isValidPassword, PASSWORD_REQUIREMENTS } from "../../utils/passwordValidation";
+import { isValidName, NAME_REQUIREMENTS, normalizeName } from "../../utils/Validations";
+import { isValidPassword, PASSWORD_REQUIREMENTS } from "../../utils/Validations";
 import logo from "../../assets/logo.png";
 import "./Login.css";
 
