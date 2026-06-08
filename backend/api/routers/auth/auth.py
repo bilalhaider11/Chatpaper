@@ -37,16 +37,6 @@ async def login_for_access_token(
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    if not member.name:
-        await db.execute(
-            update(User)
-            .where(User.id == member.id)
-            .values(name="user")
-        )
-        await db.commit()
-        
-
     access_token = auth_functions.create_access_token(
         data={"id": member.id, "email": member.email, "role": member.role},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),

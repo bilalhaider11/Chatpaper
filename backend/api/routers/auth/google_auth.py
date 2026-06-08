@@ -82,8 +82,8 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
     user_data = await service_auth.get_user_by_email(db, user_email)
     if user_data is None:
         user_data = await service_auth.create_google_user(db, user_email, google_name)
-        
-    if user_data.name is None:
+    
+    if user_data.name == 'user':
         await db.execute(
             update(User)
             .where(User.id == user_data.id)
