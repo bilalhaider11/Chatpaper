@@ -10,8 +10,8 @@ import {
   User,
 } from "../../api/axios";
 import { LogoutIcon } from "../../components/icons/Icons";
-import { isValidName, NAME_REQUIREMENTS, normalizeName } from "../../utils/nameValidation";
-import { isValidPassword, PASSWORD_REQUIREMENTS } from "../../utils/passwordValidation";
+import { isValidName, NAME_REQUIREMENTS, normalizeName } from "../../utils/Validations";
+import { isValidPassword, PASSWORD_REQUIREMENTS } from "../../utils/Validations";
 import "./Settings.css";
 
 type SettingsProps = {
