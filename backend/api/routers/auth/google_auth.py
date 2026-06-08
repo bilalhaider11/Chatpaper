@@ -79,7 +79,7 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
     google_name = user_info.get("name")
     user_data = await service_auth.get_user_by_email(db, user_email)
     if user_data is None:
-        user_data = await service_auth.create_google_user(db, user_email)
+        user_data = await service_auth.create_google_user(db, user_email, google_name)
 
     role = user_data.role.value if hasattr(user_data.role, "value") else user_data.role
 

@@ -81,7 +81,7 @@ async def read_user_by_id(user_id: int, db: AsyncSession = Depends(get_db)):
     return await auth_service.get_user_by_id(db, user_id)
 
 
-@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+@router.patch("/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
     request: Request,
     payload: schema_auth.ChangePassword,

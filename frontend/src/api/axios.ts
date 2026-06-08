@@ -73,7 +73,7 @@ export async function changePassword(
   newPassword: string,
   options?: { currentPassword?: string; userId?: number }
 ) {
-  await api.post("/auth/change-password", {
+  await api.patch("/auth/change-password", {
     new_password: newPassword,
     ...(options?.currentPassword ? { current_password: options.currentPassword } : {}),
     ...(options?.userId !== undefined ? { user_id: options.userId } : {}),
