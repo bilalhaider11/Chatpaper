@@ -18,7 +18,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("users", sa.Column("name", sa.String(), nullable=False))
+    op.add_column("users", sa.Column("name", sa.String(), nullable=True))
+    op.execute("UPDATE users SET name = 'user' WHERE name IS NULL")
+    op.alter_column("users", "name", nullable=False)
 
 
 def downgrade() -> None:
