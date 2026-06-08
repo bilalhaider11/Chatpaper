@@ -16,18 +16,7 @@ from sqlalchemy import update
 def seed_admin() -> None:
     db = SessionLocal()
     try:
-        # Update users with no name
-        updated = (
-            db.query(User)
-            .filter(User.name.is_(None))
-            .update({User.name: "user"})
-        )
-
-        if updated:
-            print(f"      Updated {updated} users with missing names.")
-
         if db.query(User).filter(User.email == ADMIN_EMAIL).first():
-            db.commit()
             print(f"      Admin '{ADMIN_EMAIL}' already exists — skipped.")
             return
 
