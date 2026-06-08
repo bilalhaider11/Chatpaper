@@ -2,6 +2,7 @@ import logging
 import secrets
 from datetime import timedelta
 
+from models.auth import User
 import httpx
 from authlib.integrations.starlette_client import OAuth
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
@@ -13,6 +14,7 @@ from core.config import settings
 from core.dependencies import get_db
 from core.redis_client import get_redis
 from services import auth as service_auth
+from sqlalchemy import update
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,14 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
     user_data = await service_auth.get_user_by_email(db, user_email)
     if user_data is None:
         user_data = await service_auth.create_google_user(db, user_email, google_name)
+    
+    if user_data.name == 'user':
+        await db.execute(
+            update(User)
+            .where(User.id == user_data.id)
+            .values(name=google_name)
+        )
+        await db.commit()
 
     role = user_data.role.value if hasattr(user_data.role, "value") else user_data.role
 

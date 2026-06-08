@@ -11,7 +11,7 @@ from core.password import hash_password
 from models.auth import User, UserRole
 
 ADMIN_EMAIL = "admin@chatpaper.com"
-
+from sqlalchemy import update
 
 def seed_admin() -> None:
     db = SessionLocal()
