@@ -101,7 +101,7 @@ function DocxFilePreview({ fileUrl }: { fileUrl: string }) {
     const load = async () => {
       try {
         const arrayBuffer = await fetch(fileUrl).then((r) => r.arrayBuffer());
-        const mammoth = await import("mammoth/mammoth.browser.js");
+        const mammoth = await import("mammoth/mammoth.browser");
         const result = await mammoth.convertToHtml({ arrayBuffer });
         if (!cancelled) setHtml(result.value);
       } catch {

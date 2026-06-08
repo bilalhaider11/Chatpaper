@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "mammoth/mammoth.browser": "mammoth/mammoth.browser.js",
+      "mammoth/mammoth.browser": "mammoth/mammoth.browser",
     },
   },
   server: { host: true },
