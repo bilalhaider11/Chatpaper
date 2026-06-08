@@ -9,7 +9,7 @@ import {
   updateName,
   User,
 } from "../../api/axios";
-import { LogoutIcon } from "../../components/icons/Icons";
+import { ChatBubbleIcon, FileIcon, LogoutIcon, SettingsIcon } from "../../components/icons/Icons";
 import { isValidName, NAME_REQUIREMENTS, normalizeName } from "../../utils/Validations";
 import { isValidPassword, PASSWORD_REQUIREMENTS } from "../../utils/Validations";
 import "./Settings.css";
@@ -244,9 +244,18 @@ function Settings({ onLogout }: SettingsProps) {
         </Link>
 
         <nav className="settings-nav">
-          <Link to="/chat" className="settings-nav-link">Chat</Link>
-          <Link to="/files" className="settings-nav-link">My Files</Link>
-          <Link to="/settings" className="settings-nav-link settings-nav-link-active">Settings</Link>
+          <Link to="/chat" className="settings-nav-link">
+            <ChatBubbleIcon width={16} height={16} />
+            Chat
+          </Link>
+          <Link to="/files" className="settings-nav-link">
+            <FileIcon width={16} height={16} />
+            My Files
+          </Link>
+          <Link to="/settings" className="settings-nav-link settings-nav-link-active">
+            <SettingsIcon width={16} height={16} />
+            Settings
+          </Link>
         </nav>
 
         <div className="settings-sidebar-footer">

@@ -5,7 +5,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
 import FileUpload from "../../components/fileUpload/FileUpload";
 import { DeleteIcon, EditIcon, ErrorIcon } from "../../components/icons/ActionIcons";
-import { LogoutIcon } from "../../components/icons/Icons";
+import { LogoutIcon, SettingsIcon } from "../../components/icons/Icons";
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
 import { FileRecord, getFiles } from "../../services/files_api";
 import {
@@ -517,7 +517,10 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
         </nav>
 
         <div className="sidebar-footer">
-          <Link to="/settings" className="sidebar-link">Settings</Link>
+          <Link to="/settings" className="sidebar-link">
+            <SettingsIcon width={15} height={15} />
+            Settings
+          </Link>
           <button type="button" className="sidebar-logout" onClick={logout}>
             <LogoutIcon width={15} height={15} />
             Logout

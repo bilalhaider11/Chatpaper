@@ -1,38 +1,93 @@
 .settings-page {
     display: flex;
     min-height: 100vh;
-    background: #0b0f14;
-    color: #e5e7eb;
+    background: #1a1b27;
+    color: #ececec;
 }
 
+/* ── Sidebar ── */
 .settings-sidebar {
-    width: 260px;
+    width: clamp(260px, 26vw, 380px);
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    padding: 20px 16px;
-    border-right: 1px solid rgba(60, 107, 146, 0.12);
-    background: rgba(8, 12, 18, 0.95);
+    padding: 16px;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    background: #1b2338;
+    overflow: hidden;
 }
 
 .sidebar-brand {
     display: flex;
     align-items: center;
     gap: 10px;
+    padding: 20px 16px 12px;
     text-decoration: none;
-    color: #f3f4f6;
-    padding: 4px 8px;
+    border-radius: 10px;
+    transition: opacity 0.15s ease;
+}
+
+.sidebar-brand:hover {
+    opacity: 0.8;
 }
 
 .sidebar-icon {
-    width: 28px;
-    height: 28px;
-    border-radius: 6px;
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    object-position: top center;
+    flex-shrink: 0;
 }
 
 .sidebar-brand-name {
-    font-size: 1.05rem;
+    color: #e2e8f0;
+    font-size: 1.1rem;
     font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+/* ── Nav links ── */
+.settings-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 16px;
+    flex: 1;
+}
+
+.settings-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #c5c5d2;
+    text-decoration: none;
+    padding: 11px 14px;
+    border-radius: 10px;
+    font-size: 1rem;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.settings-nav-link:hover {
+    background: rgba(148, 196, 235, 0.08);
+    color: #ececec;
+}
+
+.settings-nav-link-active {
+    background: rgba(37, 99, 235, 0.18);
+    border-left: 3px solid #2563eb;
+    padding-left: 11px;
+    color: #e2e8f0;
+}
+
+.settings-nav-link-active:hover {
+    background: rgba(37, 99, 235, 0.22);
+}
+
+/* ── Sidebar footer ── */
+.settings-sidebar-footer {
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px solid rgba(60, 107, 146, 0.08);
 }
 
 .sidebar-logout {
@@ -49,6 +104,7 @@
     cursor: pointer;
     font-size: 0.95rem;
     font-weight: 500;
+    transition: background 0.15s ease, color 0.15s ease;
 }
 
 .sidebar-logout:hover {
@@ -56,65 +112,53 @@
     color: #fca5a5;
 }
 
-.settings-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 24px;
-    flex: 1;
-}
-
-.settings-nav-link {
-    color: #c5c5d2;
-    text-decoration: none;
-    padding: 10px 12px;
-    border-radius: 8px;
-    font-size: 1rem;
-}
-
-.settings-nav-link:hover,
-.settings-nav-link-active {
-    background: rgba(255, 255, 255, 0.08);
-    color: #fff;
-}
-
-.settings-sidebar-footer {
-    margin-top: auto;
-    padding-top: 12px;
-    border-top: 1px solid rgba(60, 107, 146, 0.08);
-}
-
+/* ── Main content ── */
 .settings-main {
     flex: 1;
-    padding: 32px;
+    padding: 32px 40px;
     overflow-y: auto;
+}
+
+.settings-header {
+    padding-bottom: 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 4px;
 }
 
 .settings-header h1 {
     margin: 0 0 6px;
     font-size: 1.75rem;
+    font-weight: 700;
+    color: #e2e8f0;
 }
 
 .settings-header p {
     margin: 0;
-    color: #9ca3af;
+    color: #8e8ea0;
+    font-size: 0.95rem;
 }
 
+/* ── Panels ── */
 .settings-panel {
-    margin-top: 28px;
-    max-width: 900px;
+    margin-top: 32px;
+    max-width: 860px;
 }
 
 .settings-panel h2 {
-    margin: 0 0 8px;
-    font-size: 1.25rem;
+    margin: 0 0 4px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #e2e8f0;
+    letter-spacing: -0.01em;
 }
 
 .settings-panel-subtitle {
     margin: 0 0 20px;
-    color: #9ca3af;
+    color: #8e8ea0;
+    font-size: 0.9rem;
 }
 
+/* ── Admin layout ── */
 .settings-admin-layout {
     display: grid;
     grid-template-columns: minmax(220px, 280px) 1fr;
@@ -124,120 +168,163 @@
 .settings-user-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
 }
 
 .settings-user-item {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 4px;
+    gap: 3px;
     width: 100%;
-    border: 1px solid rgba(60, 107, 146, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.07);
     background: rgba(255, 255, 255, 0.03);
     color: inherit;
     border-radius: 10px;
-    padding: 12px;
+    padding: 12px 14px;
     cursor: pointer;
     text-align: left;
+    transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.settings-user-item:hover,
+.settings-user-item:hover {
+    border-color: rgba(96, 165, 250, 0.3);
+    background: rgba(148, 196, 235, 0.06);
+}
+
 .settings-user-item.active {
     border-color: rgba(96, 165, 250, 0.45);
-    background: rgba(59, 130, 246, 0.08);
+    background: rgba(37, 99, 235, 0.1);
+    border-left: 3px solid #2563eb;
+    padding-left: 11px;
 }
 
 .settings-user-name {
     font-weight: 600;
+    font-size: 0.95rem;
+    color: #e2e8f0;
 }
 
 .settings-user-email {
-    font-size: 0.85rem;
-    color: #9ca3af;
+    font-size: 0.82rem;
+    color: #8e8ea0;
+}
+
+/* ── Form card ── */
+.settings-form-card {
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: #1a2744;
+    border-radius: 14px;
+    padding: 24px;
+    margin-top: 12px;
+}
+
+.settings-form-card h3 {
+    margin: 0 0 18px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #c5c5d2;
 }
 
 .settings-password-form {
     margin-top: 28px;
     padding-top: 28px;
-    border-top: 1px solid rgba(60, 107, 146, 0.2);
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
-.settings-form-card {
-    border: 1px solid rgba(60, 107, 146, 0.15);
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 12px;
-    padding: 20px;
-}
-
-.settings-form-card h3 {
-    margin: 0 0 16px;
-    font-size: 1.05rem;
-}
-
+/* ── Form fields ── */
 .settings-label {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    margin-bottom: 14px;
-    font-size: 0.9rem;
-    color: #d1d5db;
+    margin-bottom: 16px;
+    font-size: 0.875rem;
+    color: #c5c5d2;
+    font-weight: 500;
 }
 
 .settings-input {
-    border: 1px solid rgba(60, 107, 146, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(0, 0, 0, 0.25);
     color: #f9fafb;
     border-radius: 8px;
-    padding: 10px 12px;
+    padding: 11px 14px;
     font-size: 1rem;
+    outline: none;
+    transition: border-color 0.15s ease;
+    font-family: inherit;
 }
 
 .settings-input:focus {
-    outline: none;
     border-color: rgba(96, 165, 250, 0.6);
+    background: rgba(0, 0, 0, 0.35);
 }
 
 .settings-hint {
-    margin: 0 0 14px;
-    font-size: 0.85rem;
-    color: #9ca3af;
+    margin: 0 0 16px;
+    font-size: 0.82rem;
+    color: #64748b;
+    line-height: 1.5;
 }
 
 .settings-error {
-    margin: 0 0 12px;
+    margin: 0 0 14px;
     color: #fca5a5;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .settings-success {
-    margin: 0 0 12px;
+    margin: 0 0 14px;
     color: #86efac;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
 }
 
+/* ── Submit button — matches chatbot new-chat-btn ── */
 .settings-submit {
     border: none;
-    background: #2563eb;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
     color: #fff;
-    border-radius: 8px;
-    padding: 10px 16px;
+    border-radius: 10px;
+    padding: 11px 20px;
     font-weight: 600;
+    font-size: 0.95rem;
     cursor: pointer;
+    box-shadow: 0 2px 12px rgba(37, 99, 235, 0.3);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    font-family: inherit;
+}
+
+.settings-submit:hover:not(:disabled) {
+    opacity: 0.88;
+    transform: translateY(-1px);
 }
 
 .settings-submit:disabled {
-    opacity: 0.6;
+    opacity: 0.55;
     cursor: not-allowed;
+    transform: none;
 }
 
 .settings-empty {
     margin: 0;
-    color: #9ca3af;
+    color: #8e8ea0;
+    padding: 20px 0;
 }
 
 @media (max-width: 900px) {
     .settings-admin-layout {
         grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 960px) {
+    .settings-sidebar {
+        display: none;
+    }
+    .settings-main {
+        padding: 24px 20px;
     }
 }

@@ -164,7 +164,7 @@ function Home({ onLogout }: HomeProps) {
           <div className="home-glow" />
           <p className="home-greeting">Welcome back</p>
           <h1 className="home-title">
-            Hello, <span>{user?.email?.split("@")[0]}</span>
+            Hello, <span>{user?.name || user?.email?.split("@")[0]}</span>
           </h1>
           <p className="home-subtitle">
             Your documents are ready to chat. Ask questions, find answers, and surface insights, instantly.
