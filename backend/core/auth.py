@@ -1,8 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
-
-import bcrypt as _bcrypt
+from core.password import verify_password
 from fastapi import Depends, HTTPException, status
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +26,7 @@ async def _get_cached_user(user_id: int) -> User | None:
     user = User()
     user.id = data["id"]
     user.email = data["email"]
+    user.name = data.get("name")
     user.role = data["role"]
     user.is_active = data["is_active"]
     user.auth_provider = data["auth_provider"]
@@ -47,6 +47,7 @@ async def _cache_user(user: User) -> None:
     data = {
         "id": user.id,
         "email": user.email,
+        "name": user.name,
         "role": user.role.value if hasattr(user.role, "value") else user.role,
         "is_active": user.is_active,
         "auth_provider": user.auth_provider,
@@ -63,16 +64,14 @@ async def invalidate_user_cache(user_id: int) -> None:
         await redis.delete(f"user:cache:{user_id}")
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return _bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
-
-
 async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | bool:
     member = await auth.get_user_by_email(db, email)
     if not member:
         return False
+    
     if member.auth_provider != "password" or member.password is None:
         return False
+    
     if not verify_password(password, member.password):
         return False
     return member

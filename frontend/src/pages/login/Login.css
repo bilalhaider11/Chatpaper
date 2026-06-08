@@ -169,6 +169,13 @@
 }
 
 /* ── Error ── */
+.login-hint {
+    margin: 0;
+    color: #9ca3af;
+    font-size: 0.8rem;
+    line-height: 1.4;
+}
+
 .login-error {
     margin: 0;
     padding: 10px 13px;

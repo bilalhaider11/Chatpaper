@@ -6,6 +6,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import auth as auth_functions
+from models.auth import User
 from services import auth as auth_service
 from schema import auth as schema_auth
 from core.config import settings
@@ -80,15 +81,24 @@ async def read_user_by_id(user_id: int, db: AsyncSession = Depends(get_db)):
     return await auth_service.get_user_by_id(db, user_id)
 
 
-@router.patch(
-    "/users/{user_id}",
-    response_model=schema_auth.User,
-    dependencies=[Depends(RoleChecker(["admin"]))],
-)
-async def update_user(
-    user_id: int, user: schema_auth.UserUpdate, db: AsyncSession = Depends(get_db)
+@router.patch("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    request: Request,
+    payload: schema_auth.ChangePassword,
+    current_user: Annotated[User, Depends(auth_functions.get_current_user)],
+    db: AsyncSession = Depends(get_db),
 ):
-    return await auth_service.update_user(db, user_id, user)
+    return await auth_service.change_password(db, current_user, payload)
+
+
+@router.patch("/update-name", response_model=schema_auth.User)
+async def update_name(
+    request: Request,
+    payload: schema_auth.UpdateName,
+    current_user: Annotated[User, Depends(auth_functions.get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    return await auth_service.update_name(db, current_user, payload)
 
 
 @router.delete(

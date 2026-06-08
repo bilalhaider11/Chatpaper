@@ -5,9 +5,9 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import bcrypt as _bcrypt
 from core.config import settings
 from core.database import SessionLocal
+from core.password import hash_password
 from models.auth import User, UserRole
 
 ADMIN_EMAIL = "admin@chatpaper.com"
@@ -22,7 +22,8 @@ def seed_admin() -> None:
 
         admin = User(
             email=ADMIN_EMAIL,
-            password=_bcrypt.hashpw(settings.admin_password.encode(), _bcrypt.gensalt()).decode(),
+            name="Admin",
+            password=hash_password(settings.admin_password),
             role=UserRole.admin,
             is_active=True,
         )

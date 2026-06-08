@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { exchangeOAuthCode, login, signup } from "../../api/axios";
-import { tokenStore } from "../../api/axios";
+import { exchangeOAuthCode, login, signup, tokenStore } from "../../api/axios";
 import { GoogleAuthButton } from "../../components/login/google_auth";
+import { isValidName, NAME_REQUIREMENTS, normalizeName } from "../../utils/Validations";
+import { isValidPassword, PASSWORD_REQUIREMENTS } from "../../utils/Validations";
 import logo from "../../assets/logo.png";
 import "./Login.css";
 
@@ -13,6 +14,7 @@ type LoginProps = {
 function Login({ onLoginSuccess }: LoginProps) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -39,18 +41,30 @@ function Login({ onLoginSuccess }: LoginProps) {
     if (next === mode) return;
     setMode(next);
     setError("");
+    if (next === "login") setName("");
   };
 
   const handleSubmit = async (event: { preventDefault(): void }) => {
     event.preventDefault();
     setError("");
-    setLoading(true);
-
     const isSignup = mode === "signup";
+
+    if (isSignup) {
+      if (!isValidName(name)) {
+        setError(NAME_REQUIREMENTS);
+        return;
+      }
+      if (!isValidPassword(password)) {
+        setError(PASSWORD_REQUIREMENTS);
+        return;
+      }
+    }
+
+    setLoading(true);
 
     try {
       if (isSignup) {
-        await signup(email, password);
+        await signup(email, password, normalizeName(name));
       }
       const login_res = await login(email, password);
       tokenStore.setToken(login_res.access_token);
@@ -58,7 +72,12 @@ function Login({ onLoginSuccess }: LoginProps) {
       navigate("/", { replace: true });
     } catch (err: any) {
       const status = err?.response?.status;
-      if (isSignup && status === 400) {
+      const detail = err?.response?.data?.detail;
+      if (isSignup && Array.isArray(detail)) {
+        setError(detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join(" ") || "Invalid signup details.");
+      } else if (isSignup && typeof detail === "string") {
+        setError(detail);
+      } else if (isSignup && status === 400) {
         setError("Email already registered.");
       } else if (isSignup && status === 403) {
         setError("Registration is currently closed.");
@@ -107,6 +126,17 @@ function Login({ onLoginSuccess }: LoginProps) {
         </p>
 
         <div className="login-fields">
+          {!isLogin && (
+            <input
+              type="text"
+              placeholder="Full name"
+              className="login-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              autoComplete="name"
+            />
+          )}
           <input
             type="email"
             placeholder="Email address"
@@ -125,6 +155,12 @@ function Login({ onLoginSuccess }: LoginProps) {
             required
             autoComplete={isLogin ? "current-password" : "new-password"}
           />
+          {!isLogin && (
+            <>
+              <p className="login-hint">{NAME_REQUIREMENTS}</p>
+              <p className="login-hint">{PASSWORD_REQUIREMENTS}</p>
+            </>
+          )}
         </div>
 
         {error && <p className="login-error">{error}</p>}

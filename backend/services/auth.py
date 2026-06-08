@@ -1,8 +1,8 @@
-import bcrypt as _bcrypt
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from sqlalchemy import update
+from core.password import hash_password, verify_password
 from models.auth import User
 from schema import auth as schema_auth
 
@@ -23,16 +23,20 @@ async def get_user_by_id(db: AsyncSession, user_id: int) -> User:
 
 
 async def create_new_user(db: AsyncSession, user: schema_auth.UserCreate) -> User:
-    hashed_password = _bcrypt.hashpw(user.password.encode(), _bcrypt.gensalt()).decode()
-    new_user = User(email=user.email, password=hashed_password, auth_provider="password")
+    new_user = User(
+        email=user.email,
+        password=hash_password(user.password),
+        name=user.name,
+        auth_provider="password",
+    )
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
     return new_user
 
 
-async def create_google_user(db: AsyncSession, email: str) -> User:
-    new_user = User(email=email, password=None, auth_provider="google")
+async def create_google_user(db: AsyncSession, email: str, name: str | None = None) -> User:
+    new_user = User(email=email, name=name, password=None, auth_provider="google")
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
@@ -44,20 +48,66 @@ async def read_all_user(db: AsyncSession, skip: int, limit: int) -> list[User]:
     return list(result.scalars().all())
 
 
-async def update_user(db: AsyncSession, user_id: int, user: schema_auth.UserUpdate) -> User:
-    db_user = await get_user_by_id(db, user_id)
-    updated_data = user.model_dump(exclude_unset=True)
-    for key, value in updated_data.items():
-        if key == "password":
-            value = _bcrypt.hashpw(value.encode(), _bcrypt.gensalt()).decode()
-        setattr(db_user, key, value)
-    db.add(db_user)
+async def change_password(
+    db: AsyncSession,
+    current_user: User,
+    payload: schema_auth.ChangePassword,
+) -> None:
+    target_user_id = payload.user_id if payload.user_id is not None else current_user.id
+
+    db_user = await get_user_by_id(db, target_user_id)
+
+    if target_user_id != current_user.id:
+        role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
+        if role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Not authorized to change this user's password",
+            )
+    elif db_user.auth_provider != "google":
+        if not payload.current_password:
+            raise HTTPException(status_code=400, detail="Current password is required")
+        if not db_user.password or not verify_password(payload.current_password, db_user.password):
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    update_values: dict = {"password": hash_password(payload.new_password)}
+    if db_user.auth_provider == "google":
+        update_values["auth_provider"] = "password" 
+
+    await db.execute(
+        update(User)
+        .where(User.id == target_user_id)
+        .values(**update_values)
+    )
+    await db.commit()
+
+    from core.auth import invalidate_user_cache
+    await invalidate_user_cache(target_user_id)
+
+async def update_name(
+    db: AsyncSession,
+    current_user: User,
+    payload: schema_auth.UpdateName,
+) -> User:
+    target_user_id = payload.user_id if payload.user_id is not None else current_user.id
+
+    if target_user_id != current_user.id:
+        role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
+        if role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Not authorized to update this user's name",
+            )
+
+    db_user = await get_user_by_id(db, target_user_id)
+    
+    db_user.name = payload.name
     await db.commit()
     await db.refresh(db_user)
-    from core.auth import invalidate_user_cache
-    await invalidate_user_cache(user_id)
-    return db_user
 
+    from core.auth import invalidate_user_cache
+    await invalidate_user_cache(target_user_id)
+    return db_user
 
 async def delete_user(db: AsyncSession, user_id: int) -> dict:
     db_user = await get_user_by_id(db, user_id)

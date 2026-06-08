@@ -1,16 +1,30 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from core.validations import validate_name as validate_name_format
+from core.validations import validate_password_strength
 from models import auth
 
 
 class UserBase(BaseModel):
     email: EmailStr
+    name: str | None = None
 
 
 class UserCreate(UserBase):
-    password: str
+    name: str
+    password: str = Field(min_length=8)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        return validate_password_strength(value)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return validate_name_format(value)
 
 
 class UserLogin(UserBase):
@@ -31,6 +45,36 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
     role: auth.UserRole | None = None
     password: str | None = None
+    name: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return validate_name_format(value)
+
+
+class ChangePassword(BaseModel):
+    new_password: str = Field(min_length=8)
+    current_password: str | None = None
+    user_id: int | None = None
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        return validate_password_strength(value)
+
+
+class UpdateName(BaseModel):
+    name: str
+    user_id: int | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return validate_name_format(value)
+
 
 
 class Token(BaseModel):

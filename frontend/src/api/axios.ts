@@ -7,8 +7,10 @@ const TOKEN_KEY = "auth_token";
 export type User = {
   id: number;
   email: string;
+  name: string | null;
   role: string;
   is_active: boolean;
+  auth_provider?: string;
 };
 
 export const api = axios.create({
@@ -53,17 +55,37 @@ export async function exchangeOAuthCode(code: string) {
   return response.data;
 }
 
-export async function signup(email:string, password:string){
-  const payload = {
-  "email": email,
-  "password": password
+export async function signup(email: string, password: string, name: string) {
+  const response = await api.post("/auth/users", {
+    email,
+    password,
+    name,
+  });
+  return response.data;
 }
-  const response = await api.post(
-    "auth/users",
-    payload
 
-  )
-  return response.data
+export async function fetchAllUsers() {
+  const response = await api.get<User[]>("/auth/users");
+  return response.data;
+}
+
+export async function changePassword(
+  newPassword: string,
+  options?: { currentPassword?: string; userId?: number }
+) {
+  await api.patch("/auth/change-password", {
+    new_password: newPassword,
+    ...(options?.currentPassword ? { current_password: options.currentPassword } : {}),
+    ...(options?.userId !== undefined ? { user_id: options.userId } : {}),
+  });
+}
+
+export async function updateName(name: string, userId?: number) {
+  const response = await api.patch<User>("/auth/update-name", {
+    name,
+    ...(userId !== undefined ? { user_id: userId } : {}),
+  });
+  return response.data;
 }
 
 export async function fetchCurrentUser() {
