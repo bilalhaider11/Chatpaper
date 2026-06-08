@@ -2,8 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-from core.name_validation import validate_name as validate_name_format
-from core.password_validation import validate_password_strength
+from core.validations import validate_name as validate_name_format
+from core.validations import validate_password_strength
 from models import auth
 
 

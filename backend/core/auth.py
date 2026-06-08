@@ -68,6 +68,10 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> User
     member = await auth.get_user_by_email(db, email)
     if not member:
         return False
+    
+    if member.auth_provider != "password" or member.password is None:
+        return False
+    
     if not verify_password(password, member.password):
         return False
     return member
