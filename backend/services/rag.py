@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.llm import get_chat_llm
-from models.conversation import Conversation
+from models.conversation import Conversation, ConversationList
 from schema.chat import Citation
 from services.retrieval import RetrievedContext, retrieve
 
@@ -125,6 +125,12 @@ async def prepare(
     match convo.conversation_type:
         case "per_file":
             file_ids = [convo.file_id] if convo.file_id else None
+        case "global":
+            data = await db.execute(
+                select(ConversationList.file_id)
+                .where(ConversationList.user_id == convo.id.ConversationList.is_active.is_(True))
+            )
+            file_ids = data.scalars().all()
         case _:
             file_ids = None
 
