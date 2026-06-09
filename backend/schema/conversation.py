@@ -24,7 +24,7 @@ class ConversationListResponse(ConversationListBase):
 
 
 class ConversationCreateRequest(BaseModel):
-    conversation_title: str = "New conversation"
+    conversation_title: str = "Global conversation"
     # per_file conversations are created automatically on file upload — not via this endpoint
     conversation_type: Literal["global"] = "global"
 

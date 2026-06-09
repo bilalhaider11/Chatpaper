@@ -524,12 +524,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
           <img src={logo} alt="" className="sidebar-icon" />
           <span className="sidebar-brand-name">Chatpaper</span>
         </Link>
-        {globalConversations.length > 0 ? (
-          <nav className="global-conversation-list">
-            {globalConversations.map(renderConversationItem)}
-          </nav>
-        ) : null}
-
+        
         <div className="sidebar-actions">
           <button
             type="button"
@@ -541,15 +536,22 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
           </button>
           <button
             type="button"
-            className="global-chat-btn"
+            className="new-chat-btn"
             onClick={() => void handleCreateGlobalChat()}
-            disabled={creatingChat}
+            disabled={creatingChat || globalConversations.length > 0}
+            title={globalConversations.length > 0 ? "A global conversation already exists." : undefined}
           >
             Global Chat
           </button>
         </div>
 
         <div className="sidebar-section-label">Conversations</div>
+        {globalConversations.length > 0 ? (
+          <nav className="global-conversation-list">
+            {globalConversations.map(renderConversationItem)}
+          </nav>
+        ) : null}
+
 
         <nav className="conversation-list">
           {fileConversations.length === 0 ? (
