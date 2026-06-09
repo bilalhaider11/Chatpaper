@@ -52,6 +52,21 @@ async def conversation_list(
 ):
     if body is None:
         body = ConversationCreateRequest()
+
+    result = await db.execute(
+        select(ConversationList).where(
+            ConversationList.conversation_type == body.conversation_type,
+            ConversationList.user_id == current_user.id,
+            ConversationList.is_active.is_(True),
+        )
+    )
+    user_conversation = result.scalar_one_or_none()
+    
+    if user_conversation is not None:
+        raise HTTPException(
+            status_code=503,
+            detail="Global conversation already exists"
+        )
     return await conversation_service.create_conversation_list(current_user, body, db)
 
 

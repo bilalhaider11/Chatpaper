@@ -86,6 +86,16 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
     return [...persisted, ...live];
   }, [messages, liveMessages]);
 
+  const globalConversations = useMemo(
+    () => conversations.filter((c) => c.conversation_type === "global"),
+    [conversations]
+  );
+
+  const fileConversations = useMemo(
+    () => conversations.filter((c) => c.conversation_type !== "global"),
+    [conversations]
+  );
+
   const handleWsEvent = useCallback((event: ChatWsEvent) => {
     if (event.type === "chunk") {
       setLiveMessages((prev) => {
@@ -311,6 +321,23 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
     setisopen(true);
   };
 
+  const handleCreateGlobalChat = async () => {
+    if (creatingChat) return;
+    setCreatingChat(true);
+    try {
+      const newConversation = await createConversationList({ conversation_type: "global" });
+      setConversations((prev) => [newConversation, ...prev]);
+      setSelectedConversationId(newConversation.id);
+      selectedConvRef.current = newConversation.id;
+      setMessages([]);
+      setLiveMessages([]);
+      setWsError(null);
+      navigate(`/chat/${newConversation.id}`);
+    } finally {
+      setCreatingChat(false);
+    }
+  };
+
   const handleSend = async (event?: { preventDefault(): void }) => {
     event?.preventDefault();
     setWsError(null);
@@ -326,7 +353,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
       }
       setCreatingChat(true);
       try {
-        const newConversation = await createConversationList();
+        const newConversation = await createConversationList({ conversation_type: "global" });
         setConversations((prev) => [newConversation, ...prev]);
         conversationListId = newConversation.id;
         // Set state directly so the WS hook reconnects immediately,
@@ -419,6 +446,77 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
     (item) => item.id === selectedConversationId
   );
 
+  const renderConversationItem = (conversation: ConversationListItem) => (
+    <div
+      key={conversation.id}
+      role="button"
+      tabIndex={0}
+      className={`conversation-item${conversation.id === selectedConversationId ? " active" : ""}`}
+      onClick={() => handleSelectConversation(conversation.id)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleSelectConversation(conversation.id); }}
+    >
+      {editingId === conversation.id ? (
+        <form
+          onSubmit={(e) => handleSaveEdit(e, conversation.id)}
+          onClick={(e) => e.stopPropagation()}
+          className="edit-form"
+        >
+          <input
+            type="text"
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            autoFocus
+            className="edit-input"
+          />
+          <button type="submit" className="edit-form-save">Save</button>
+          <button
+            type="button"
+            className="edit-form-cancel"
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditingId(0);
+            }}
+          >
+            Cancel
+          </button>
+        </form>
+      ) : (
+        <>
+          <span className="conversation-icon">
+            {conversation.file_id ? "📄" : "🌐"}
+          </span>
+          <span className="conversation-title">
+            {conversation.conversation_title || "New chat"}
+          </span>
+          <div className="conversation-actions">
+            <button
+              type="button"
+              className="conversation-icon-btn edit"
+              aria-label="Edit conversation title"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleStartEdit(conversation);
+              }}
+            >
+              <EditIcon width={14} height={14} />
+            </button>
+            <button
+              type="button"
+              className="conversation-icon-btn delete"
+              aria-label="Delete conversation"
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleDelete(conversation.id);
+              }}
+            >
+              <DeleteIcon width={14} height={14} />
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div className="chatbot-page">
       <aside className="chatbot-sidebar">
@@ -426,7 +524,13 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
           <img src={logo} alt="" className="sidebar-icon" />
           <span className="sidebar-brand-name">Chatpaper</span>
         </Link>
-        <div className="sidebar-top">
+        {globalConversations.length > 0 ? (
+          <nav className="global-conversation-list">
+            {globalConversations.map(renderConversationItem)}
+          </nav>
+        ) : null}
+
+        <div className="sidebar-actions">
           <button
             type="button"
             className="new-chat-btn"
@@ -435,84 +539,23 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
           >
             + New Chat
           </button>
+          <button
+            type="button"
+            className="global-chat-btn"
+            onClick={() => void handleCreateGlobalChat()}
+            disabled={creatingChat}
+          >
+            Global Chat
+          </button>
         </div>
 
         <div className="sidebar-section-label">Conversations</div>
 
         <nav className="conversation-list">
-          {conversations.length === 0 ? (
+          {fileConversations.length === 0 ? (
             <p className="sidebar-empty">No conversations yet. Upload a document to begin.</p>
           ) : (
-            conversations.map((conversation) => (
-              <div
-                key={conversation.id}
-                role="button"
-                tabIndex={0}
-                className={`conversation-item${conversation.id === selectedConversationId ? " active" : ""}`}
-                onClick={() => handleSelectConversation(conversation.id)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleSelectConversation(conversation.id); }}
-              >
-                {editingId === conversation.id ? (
-                  <form
-                    onSubmit={(e) => handleSaveEdit(e, conversation.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="edit-form"
-                  >
-                    <input
-                      type="text"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      autoFocus
-                      className="edit-input"
-                    />
-                    <button type="submit" className="edit-form-save">Save</button>
-                    <button
-                      type="button"
-                      className="edit-form-cancel"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingId(0);
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </form>
-                ) : (
-                  <>
-                    <span className="conversation-icon">
-                      {conversation.file_id ? "📄" : "🌐"}
-                    </span>
-                    <span className="conversation-title">
-                      {conversation.conversation_title || "New chat"}
-                    </span>
-                    <div className="conversation-actions">
-                      <button
-                        type="button"
-                        className="conversation-icon-btn edit"
-                        aria-label="Edit conversation title"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleStartEdit(conversation);
-                        }}
-                      >
-                        <EditIcon width={14} height={14} />
-                      </button>
-                      <button
-                        type="button"
-                        className="conversation-icon-btn delete"
-                        aria-label="Delete conversation"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleDelete(conversation.id);
-                        }}
-                      >
-                        <DeleteIcon width={14} height={14} />
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))
+            fileConversations.map(renderConversationItem)
           )}
         </nav>
 
