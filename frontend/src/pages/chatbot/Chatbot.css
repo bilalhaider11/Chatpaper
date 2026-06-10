@@ -21,7 +21,8 @@
     border-right: 1px solid rgba(255, 255, 255, 0.08);
     background: #1b2338;
     padding: 16px;
-    overflow: hidden; /* grid stretches it to 100vh automatically */
+    overflow: hidden;
+    /* grid stretches it to 100vh automatically */
 }
 
 .sidebar-brand {
@@ -53,12 +54,24 @@
     letter-spacing: -0.01em;
 }
 
-.sidebar-top {
+.sidebar-actions {
+    display: flex;
+    gap: 8px;
     margin-bottom: 12px;
 }
 
+.global-conversation-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+    max-height: 35vh;
+    overflow-y: auto;
+}
+
 .new-chat-btn {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     border: none;
     background: linear-gradient(135deg, #2563eb, #1d4ed8);
     color: #fff;
@@ -80,6 +93,16 @@
     opacity: 0.55;
     cursor: not-allowed;
     transform: none;
+}
+
+.global-chat-btn:hover {
+    background: rgba(37, 99, 235, 0.22);
+    border-color: rgba(37, 99, 235, 0.65);
+}
+
+.global-chat-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .start-chat-btn {
@@ -331,7 +354,8 @@
 .chatbot-main {
     display: grid;
     grid-template-rows: auto 1fr auto;
-    min-height: 0; /* grid stretches it to 100vh; min-height:0 lets children respect the bound */
+    min-height: 0;
+    /* grid stretches it to 100vh; min-height:0 lets children respect the bound */
     overflow: hidden;
 }
 
@@ -362,12 +386,15 @@
     gap: 20px;
     padding: 28px 32px;
     overflow-y: auto;
-    min-height: 0; /* required for grid child to scroll within fixed height */
-    scrollbar-width: none; /* Firefox */
+    min-height: 0;
+    /* required for grid child to scroll within fixed height */
+    scrollbar-width: none;
+    /* Firefox */
 }
 
 .chatbot-messages::-webkit-scrollbar {
-    display: none; /* Chrome / Safari */
+    display: none;
+    /* Chrome / Safari */
 }
 
 .chatbot-empty-state {
@@ -571,7 +598,9 @@
 }
 
 @keyframes typing-bounce {
-    0%, 60%, 100% {
+    0%,
+    60%,
+    100% {
         transform: translateY(0);
         opacity: 0.4;
     }

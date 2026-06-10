@@ -81,9 +81,17 @@ export async function getConversation(conversationListId: number) {
   return response.data;
 }
 
-export async function createConversationList() {
+export type CreateConversationListPayload = {
+  conversation_title?: string;
+  conversation_type: "global";
+};
+
+export async function createConversationList(
+  payload: CreateConversationListPayload = { conversation_type: "global" }
+) {
   const response = await api.post<ConversationListItem>(
-    "/conversation/inconversationlist"
+    "/conversation/inconversationlist",
+    payload
   );
   return response.data;
 }
