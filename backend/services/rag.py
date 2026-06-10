@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.llm import get_chat_llm
-from models.conversation import Conversation, ConversationList
+from models.conversation import Conversation
 from schema.chat import Citation
 from services.retrieval import RetrievedContext, retrieve
 
@@ -27,13 +27,16 @@ _CITATION_RE = re.compile(r"\[(\d+)\]")
 
 _PROMPT_HEADER = (
     "You are a research assistant. Answer using ONLY the document context below. "
-    "Cite sources with [N] notation matching the context numbers. "
-    "If the answer is not in the context, say so — do not fabricate.\n\n"
+    "Do NOT use your general knowledge — if the answer is not explicitly in the context, "
+    "tell the user the information is not available in their documents. "
+    "Cite sources with [N] notation matching the context numbers.\n\n"
     "Document context:\n\n"
 )
 _PROMPT_HEADER_NO_CTX = (
-    "You are a research assistant. "
-    "No relevant document context was found for this query."
+    "You are a research assistant that answers ONLY from the content of uploaded documents. "
+    "No relevant content was found in the uploaded document(s) for this query. "
+    "You MUST tell the user that this information is not available in their documents. "
+    "Do NOT answer from your general knowledge under any circumstances."
 )
 
 
@@ -115,24 +118,21 @@ async def prepare(
     history.reverse()
     history = _truncate_history(history, settings.chat_history_max_chars)
 
-    prior_assistant = [t.statement for t in history if t.user_type == "assistant"][
-        -settings.retrieval_history_context_turns:
-    ]
-    retrieval_query = question
-    if prior_assistant:
-        retrieval_query = f"[Prior context: {' '.join(prior_assistant)}] {question}"
-
     match convo.conversation_type:
         case "per_file":
             file_ids = [convo.file_id] if convo.file_id else None
-        case "global":
-            data = await db.execute(
-                select(ConversationList.file_id)
-                .where(ConversationList.user_id == convo.id.ConversationList.is_active.is_(True))
+            # Per-file only: prior context is safe because file_ids locks retrieval to one doc.
+            # Global skips this — off-topic prior responses bias the embedding across files.
+            prior_assistant = [t.statement for t in history if t.user_type == "assistant"][
+                -settings.retrieval_history_context_turns:
+            ]
+            retrieval_query = (
+                f"[Prior context: {' '.join(prior_assistant)}] {question}"
+                if prior_assistant else question
             )
-            file_ids = data.scalars().all()
         case _:
             file_ids = None
+            retrieval_query = question
 
     contexts = await retrieve(
         query=retrieval_query,

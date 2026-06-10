@@ -46,10 +46,9 @@ services:
     image: chromadb/chroma:latest
     environment:
       - IS_PERSISTENT=TRUE
-      - PERSIST_DIRECTORY=/chroma/chroma
       - ANONYMIZED_TELEMETRY=FALSE
     volumes:
-      - ./chroma-data:/chroma/chroma
+      - ./chroma-data:/data
     ports:
       - "8001:8000"
     healthcheck:
