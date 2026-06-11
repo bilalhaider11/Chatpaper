@@ -17,6 +17,8 @@ class Settings(BaseModel):
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
     
     chat_data_ttl_seconds:int = int(os.getenv("CHAT_DATA_TTL_SECONDS",'3600'))
+    #email token for forgot password TTL
+    email_token_ttl_in_seconds:int = int(os.getenv("EMAIL_TOKEN_TTL_IN_SECONDS",600))
 
     # Set true in multi-worker production: startup aborts if Redis is unreachable.
     require_redis: bool = os.getenv("REQUIRE_REDIS", "false").lower() == "true"

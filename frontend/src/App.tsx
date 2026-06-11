@@ -1,7 +1,9 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useState } from "react";
 import Home from "./pages/home/Home";
+import ForgotPassword from "./pages/login/ForgotPassword";
 import Login from "./pages/login/Login";
+import ResetPassword from "./pages/login/ResetPassword";
 import Chatbot from "./pages/chatbot/Chatbot";
 import Files from "./pages/files/Files";
 import Settings from "./pages/settings/Settings";
@@ -23,6 +25,22 @@ function App() {
             <Navigate to="/" replace />
           ) : (
             <Login onLoginSuccess={() => setIsAuthenticated(true)} />
+          )
+        }
+      />
+      <Route
+        path="/forgot-password"
+        element={
+          isAuthenticated ? <Navigate to="/" replace /> : <ForgotPassword />
+        }
+      />
+      <Route
+        path="/reset-password"
+        element={
+          isAuthenticated ? (
+            <Navigate to="/" replace />
+          ) : (
+            <ResetPassword onLoginSuccess={() => setIsAuthenticated(true)} />
           )
         }
       />

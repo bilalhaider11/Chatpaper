@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { exchangeOAuthCode, login, signup, tokenStore } from "../../api/axios";
 import { GoogleAuthButton } from "../../components/login/google_auth";
 import { isValidName, NAME_REQUIREMENTS, normalizeName } from "../../utils/Validations";
@@ -155,6 +155,11 @@ function Login({ onLoginSuccess }: LoginProps) {
             required
             autoComplete={isLogin ? "current-password" : "new-password"}
           />
+          {isLogin && (
+            <p className="login-forgot-link">
+              <Link to="/forgot-password">Forgot password?</Link>
+            </p>
+          )}
           {!isLogin && (
             <>
               <p className="login-hint">{NAME_REQUIREMENTS}</p>
