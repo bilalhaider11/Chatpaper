@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /chat
+Disallow: /files
+Disallow: /settings
+
+Sitemap: https://www.chatpaper.ai/sitemap.xml

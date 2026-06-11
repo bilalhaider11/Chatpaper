@@ -28,7 +28,7 @@ from models.ingestion import DocumentParent
 
 
 def _child_texts(content: str) -> list[str]:
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.child_chunk_size,
         chunk_overlap=settings.child_chunk_overlap,

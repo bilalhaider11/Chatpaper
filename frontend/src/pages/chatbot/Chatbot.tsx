@@ -5,7 +5,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
 import FileUpload from "../../components/fileUpload/FileUpload";
 import { DeleteIcon, EditIcon, ErrorIcon } from "../../components/icons/ActionIcons";
-import { LogoutIcon } from "../../components/icons/Icons";
+import { FileIcon, GlobeIcon, LogoutIcon, SettingsIcon } from "../../components/icons/Icons";
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
 import { FileRecord, getFiles } from "../../services/files_api";
 import {
@@ -483,7 +483,9 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
       ) : (
         <>
           <span className="conversation-icon">
-            {conversation.file_id ? "📄" : "🌐"}
+            {conversation.file_id
+              ? <FileIcon width={14} height={14} />
+              : <GlobeIcon width={14} height={14} />}
           </span>
           <span className="conversation-title">
             {conversation.conversation_title || "New chat"}
@@ -520,7 +522,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="chatbot-page">
       <aside className="chatbot-sidebar">
-        <Link to="/" className="sidebar-brand">
+        <Link to="/dashboard" className="sidebar-brand">
           <img src={logo} alt="" className="sidebar-icon" />
           <span className="sidebar-brand-name">Chatpaper</span>
         </Link>
@@ -536,10 +538,10 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
           </button>
           <button
             type="button"
-            className="new-chat-btn"
+            className="global-chat-btn"
             onClick={() => void handleCreateGlobalChat()}
             disabled={creatingChat || globalConversations.length > 0}
-            title={globalConversations.length > 0 ? "A global conversation already exists." : undefined}
+            title={globalConversations.length > 0 ? "A global conversation already exists" : undefined}
           >
             Global Chat
           </button>
@@ -562,7 +564,10 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
         </nav>
 
         <div className="sidebar-footer">
-          <Link to="/settings" className="sidebar-link">Settings</Link>
+          <Link to="/settings" className="sidebar-link">
+            <SettingsIcon width={15} height={15} />
+            Settings
+          </Link>
           <button type="button" className="sidebar-logout" onClick={logout}>
             <LogoutIcon width={15} height={15} />
             Logout

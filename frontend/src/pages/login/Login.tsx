@@ -11,6 +11,9 @@ type LoginProps = {
   onLoginSuccess: () => void;
 };
 
+type FieldErrors = { name: string; email: string; password: string; general: string };
+const NO_ERRORS: FieldErrors = { name: "", email: "", password: "", general: "" };
+
 function Login({ onLoginSuccess }: LoginProps) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -18,8 +21,10 @@ function Login({ onLoginSuccess }: LoginProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [errors, setErrors] = useState<FieldErrors>(NO_ERRORS);
+  const [mode, setMode] = useState<"login" | "signup">(
+    () => new URLSearchParams(window.location.search).get("mode") === "signup" ? "signup" : "login"
+  );
 
   useEffect(() => {
     const code = searchParams.get("code");
@@ -31,36 +36,53 @@ function Login({ onLoginSuccess }: LoginProps) {
       .then((data) => {
         tokenStore.setToken(data.access_token);
         onLoginSuccess();
-        navigate("/", { replace: true });
+        navigate("/dashboard", { replace: true });
       })
-      .catch(() => setError("Google sign-in failed. Please try again."))
+      .catch(() => setErrors({ ...NO_ERRORS, general: "Google sign-in failed. Please try again." }))
       .finally(() => setLoading(false));
   }, [searchParams, setSearchParams, onLoginSuccess, navigate]);
 
   const switchMode = (next: "login" | "signup") => {
     if (next === mode) return;
     setMode(next);
-    setError("");
-    if (next === "login") setName("");
+    setName("");
+    setEmail("");
+    setPassword("");
+    setErrors(NO_ERRORS);
   };
 
   const handleSubmit = async (event: { preventDefault(): void }) => {
     event.preventDefault();
-    setError("");
     const isSignup = mode === "signup";
+    const next: FieldErrors = { ...NO_ERRORS };
 
     if (isSignup) {
-      if (!isValidName(name)) {
-        setError(NAME_REQUIREMENTS);
-        return;
-      }
-      if (!isValidPassword(password)) {
-        setError(PASSWORD_REQUIREMENTS);
-        return;
+      if (!name.trim()) {
+        next.name = "Name is required.";
+      } else if (!isValidName(name)) {
+        next.name = NAME_REQUIREMENTS;
       }
     }
 
+    if (!email.trim()) {
+      next.email = "Email is required.";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      next.email = "Please enter a valid email address.";
+    }
+
+    if (!password) {
+      next.password = "Password is required.";
+    } else if (isSignup && !isValidPassword(password)) {
+      next.password = PASSWORD_REQUIREMENTS;
+    }
+
+    if (next.name || next.email || next.password) {
+      setErrors(next);
+      return;
+    }
+
     setLoading(true);
+    setErrors(NO_ERRORS);
 
     try {
       if (isSignup) {
@@ -69,21 +91,23 @@ function Login({ onLoginSuccess }: LoginProps) {
       const login_res = await login(email, password);
       tokenStore.setToken(login_res.access_token);
       onLoginSuccess();
-      navigate("/", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err: any) {
       const status = err?.response?.status;
       const detail = err?.response?.data?.detail;
+      let msg: string;
       if (isSignup && Array.isArray(detail)) {
-        setError(detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join(" ") || "Invalid signup details.");
+        msg = detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join(" ") || "Invalid signup details.";
       } else if (isSignup && typeof detail === "string") {
-        setError(detail);
+        msg = detail;
       } else if (isSignup && status === 400) {
-        setError("Email already registered.");
+        msg = "Email already registered.";
       } else if (isSignup && status === 403) {
-        setError("Registration is currently closed.");
+        msg = "Registration is currently closed.";
       } else {
-        setError("Invalid credentials. Please try again.");
+        msg = "Invalid credentials. Please try again.";
       }
+      setErrors({ ...NO_ERRORS, general: msg });
     } finally {
       setLoading(false);
     }
@@ -94,7 +118,7 @@ function Login({ onLoginSuccess }: LoginProps) {
   return (
     <div className="login-page">
       <div className="login-glow" />
-      <form className="login-card" onSubmit={handleSubmit}>
+      <form className="login-card" onSubmit={handleSubmit} noValidate>
         <div className="login-brand">
           <img src={logo} alt="" className="login-logo" />
           <span className="login-brand-name">Chatpaper</span>
@@ -119,23 +143,26 @@ function Login({ onLoginSuccess }: LoginProps) {
           </button>
         </div>
 
+        <p className="login-tagline">AI-powered chat for your documents</p>
         <p className="login-subtitle">
           {isLogin
-            ? "Welcome back — sign in to continue."
-            : "New here? Create your account in seconds."}
+            ? "Welcome back. Your documents are waiting."
+            : "Start chatting with your documents — free to try."}
         </p>
 
         <div className="login-fields">
           {!isLogin && (
-            <input
-              type="text"
-              placeholder="Full name"
-              className="login-input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              autoComplete="name"
-            />
+            <div className="login-field-wrap">
+              <input
+                type="text"
+                placeholder="Full name"
+                className={`login-input${errors.name ? " login-input-error" : ""}`}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoComplete="name"
+              />
+              {errors.name && <p className="login-field-error">{errors.name}</p>}
+            </div>
           )}
           <input
             type="email"
@@ -149,7 +176,7 @@ function Login({ onLoginSuccess }: LoginProps) {
           <input
             type="password"
             placeholder="Password"
-            className="login-input"
+            className={`login-input${errors.password ? " login-input-error" : ""}`}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
@@ -168,7 +195,7 @@ function Login({ onLoginSuccess }: LoginProps) {
           )}
         </div>
 
-        {error && <p className="login-error">{error}</p>}
+        {errors.general && <p className="login-error">{errors.general}</p>}
 
         <button type="submit" className="login-submit-btn" disabled={loading}>
           {loading
@@ -178,6 +205,8 @@ function Login({ onLoginSuccess }: LoginProps) {
 
         <div className="login-divider">or</div>
         <GoogleAuthButton disabled={loading} />
+
+        <a href="/" className="login-back-link">← Back to home</a>
       </form>
     </div>
   );

@@ -13,6 +13,7 @@ type HomeProps = {
 
 type Panel =
   | { kind: "loading" }
+  | { kind: "onboarding" }
   | { kind: "tracking"; file: FileRecord }
   | { kind: "files" };
 
@@ -40,12 +41,29 @@ function TrackingPanel({ file }: { file: FileRecord }) {
         <StatusBadge status={file.ingestion_status} />
       </div>
       {!isTerminal(file.ingestion_status) && (
-        <p className="hp-tracking-hint">This may take a moment. You can start chatting once it's ready.</p>
+        <p className="hp-tracking-hint">Sit tight — we are reading and indexing your document. Usually under a minute. Chat opens automatically when ready.</p>
       )}
       <div className="hp-tracking-actions">
         <Link to="/chat" className="hp-tracking-link">Open Chat</Link>
         <Link to="/files" className="hp-tracking-link hp-tracking-link-secondary">My Files</Link>
       </div>
+    </div>
+  );
+}
+
+function OnboardingPanel({ onUpload }: { onUpload: () => void }) {
+  return (
+    <div className="upload-card hp-onboarding">
+      <h2 className="upload-card-title">Welcome to Chatpaper</h2>
+      <p className="upload-card-subtitle">Get started in three steps.</p>
+      <ol className="hp-onboarding-steps">
+        <li><span className="hp-step-num">1</span> Upload a document — PDF, Word, CSV, Excel, or TXT</li>
+        <li><span className="hp-step-num">2</span> Ask any question in plain English</li>
+        <li><span className="hp-step-num">3</span> Get cited answers — with exact source references</li>
+      </ol>
+      <button type="button" className="hp-panel-btn hp-panel-btn-primary" onClick={onUpload}>
+        Upload your first document →
+      </button>
     </div>
   );
 }
@@ -80,9 +98,9 @@ function Home({ onLogout }: HomeProps) {
         return;
       }
       try {
-        const [currentUser] = await Promise.all([fetchCurrentUser(), getFiles()]);
+        const [currentUser, files] = await Promise.all([fetchCurrentUser(), getFiles()]);
         setUser(currentUser);
-        setPanel({ kind: "files" });
+        setPanel(files.length === 0 ? { kind: "onboarding" } : { kind: "files" });
       } catch {
         tokenStore.clear();
         onLogout();
@@ -128,6 +146,8 @@ function Home({ onLogout }: HomeProps) {
     switch (panel.kind) {
       case "loading":
         return <div className="upload-card"><p className="upload-card-subtitle">Loading…</p></div>;
+      case "onboarding":
+        return <OnboardingPanel onUpload={() => setShowUpload(true)} />;
       case "tracking":
         return <TrackingPanel file={panel.file} />;
       case "files":
@@ -162,12 +182,13 @@ function Home({ onLogout }: HomeProps) {
       <div className="home-content">
         <div className="home-hero">
           <div className="home-glow" />
-          <p className="home-greeting">Welcome back</p>
           <h1 className="home-title">
-            Hello, <span>{user?.email?.split("@")[0]}</span>
+            Hello, <span>{user?.name || user?.email?.split("@")[0]}</span>
           </h1>
           <p className="home-subtitle">
-            Your documents are ready to chat. Ask questions, find answers, and surface insights, instantly.
+            {panel.kind === "onboarding"
+              ? "Upload your first document and start asking questions — answers with citations, instantly."
+              : "Your documents are ready to chat. Ask questions, find answers, and surface insights, instantly."}
           </p>
           <div className="home-ctas">
             <Link to="/chat" className="home-cta-primary">Open Chat →</Link>

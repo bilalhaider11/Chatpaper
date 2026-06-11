@@ -176,7 +176,7 @@ function Files({ onLogout }: { onLogout: () => void }) {
 
       {/* ── Navbar ── */}
       <nav className="files-navbar">
-        <Link to="/" className="files-nav-brand">
+        <Link to="/dashboard" className="files-nav-brand">
           <img src={logo} alt="" className="files-nav-icon" />
           <span className="files-nav-brand-name">Chatpaper</span>
         </Link>
