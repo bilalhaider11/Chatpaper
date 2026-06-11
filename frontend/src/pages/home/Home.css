@@ -345,3 +345,41 @@
         align-items: flex-start;
     }
 }
+/* ── Onboarding panel ── */
+.hp-onboarding {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.hp-onboarding-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hp-onboarding-steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.875rem;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+.hp-step-num {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 700;
+}

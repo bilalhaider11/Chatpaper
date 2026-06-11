@@ -238,7 +238,7 @@ function Settings({ onLogout }: SettingsProps) {
   return (
     <div className="settings-page">
       <aside className="settings-sidebar">
-        <Link to="/" className="sidebar-brand">
+        <Link to="/dashboard" className="sidebar-brand">
           <img src={logo} alt="" className="sidebar-icon" />
           <span className="sidebar-brand-name">Chatpaper</span>
         </Link>

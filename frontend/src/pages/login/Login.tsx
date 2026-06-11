@@ -22,7 +22,9 @@ function Login({ onLoginSuccess }: LoginProps) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>(NO_ERRORS);
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<"login" | "signup">(
+    () => new URLSearchParams(window.location.search).get("mode") === "signup" ? "signup" : "login"
+  );
 
   useEffect(() => {
     const code = searchParams.get("code");
@@ -34,7 +36,7 @@ function Login({ onLoginSuccess }: LoginProps) {
       .then((data) => {
         tokenStore.setToken(data.access_token);
         onLoginSuccess();
-        navigate("/", { replace: true });
+        navigate("/dashboard", { replace: true });
       })
       .catch(() => setErrors({ ...NO_ERRORS, general: "Google sign-in failed. Please try again." }))
       .finally(() => setLoading(false));
@@ -89,7 +91,7 @@ function Login({ onLoginSuccess }: LoginProps) {
       const login_res = await login(email, password);
       tokenStore.setToken(login_res.access_token);
       onLoginSuccess();
-      navigate("/", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err: any) {
       const status = err?.response?.status;
       const detail = err?.response?.data?.detail;
@@ -141,10 +143,11 @@ function Login({ onLoginSuccess }: LoginProps) {
           </button>
         </div>
 
+        <p className="login-tagline">AI-powered chat for your documents</p>
         <p className="login-subtitle">
           {isLogin
-            ? "Welcome back — sign in to continue."
-            : "New here? Create your account in seconds."}
+            ? "Welcome back. Your documents are waiting."
+            : "Start chatting with your documents — free to try."}
         </p>
 
         <div className="login-fields">
@@ -195,6 +198,8 @@ function Login({ onLoginSuccess }: LoginProps) {
 
         <div className="login-divider">or</div>
         <GoogleAuthButton disabled={loading} />
+
+        <a href="/" className="login-back-link">← Back to home</a>
       </form>
     </div>
   );

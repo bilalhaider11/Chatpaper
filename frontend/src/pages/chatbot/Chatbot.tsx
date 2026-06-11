@@ -522,7 +522,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="chatbot-page">
       <aside className="chatbot-sidebar">
-        <Link to="/" className="sidebar-brand">
+        <Link to="/dashboard" className="sidebar-brand">
           <img src={logo} alt="" className="sidebar-icon" />
           <span className="sidebar-brand-name">Chatpaper</span>
         </Link>
