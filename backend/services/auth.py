@@ -8,7 +8,10 @@ from schema import auth as schema_auth
 from core.config import settings
 from fastapi.responses import HTMLResponse
 import secrets
-from core.redis_client import get_redis    
+from core.redis_client import get_redis   
+from fastapi import FastAPI
+from fastapi_mail import FastMail, MessageSchema
+from core.email_config import configure_email_credentials
 
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
     result = await db.execute(
@@ -112,21 +115,19 @@ async def update_name(
     await invalidate_user_cache(target_user_id)
     return db_user
 
-async def get_ui(reset_password_link):
-    subject="Reset Password request by chatpaper"
-    html_content = f"""
-    <html>
-        <head>
-            <title>Reset password link for Chatpaper</title>
-        </head>
-        <body>
-            <h1>Click the link below to reset your password for your email</h1>
-            
-            <a href="{reset_password_link}">Reset Password</a>
-        </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content,subject=subject, status_code=200)
+async def get_ui(reset_password_link: str):
+    subject = "Reset Password request by chatpaper"
+    html_content = f"""<html>
+    <head>
+        <title>Reset password link for Chatpaper</title>
+    </head>
+    <body>
+        <h1>Click the link below to reset your password for your email</h1>
+        <a href="{reset_password_link}">Reset Password</a>
+    </body>
+</html>"""
+    return subject, html_content
+
 
 async def request_password_reset(db: AsyncSession, reset_url: str, user: object) -> None:
     """send email logic function."""
@@ -142,9 +143,23 @@ async def request_password_reset(db: AsyncSession, reset_url: str, user: object)
     ttl_seconds = settings.email_token_ttl_in_seconds
     await redis.set(f"password_reset:{token}", int(user.id), ex=ttl_seconds)
     
-  
-    #email_format = await get_ui( reset_url.format(token=token))
+    url = reset_url.format(token=token)
+    subject,email_format = await get_ui(url)
+    conf = configure_email_credentials()
     
+    message = MessageSchema(
+       subject=subject,
+       recipients=[user.email],
+       body=email_format,
+       subtype="html"
+    )
+    try:
+        fm = FastMail(conf)
+        await fm.send_message(message)
+    except Exception as e:
+        print("EMAIL ERROR:", repr(e))
+        raise
+        
 
 async def validate_password_reset_token(token: str) -> bool:
     from core.redis_client import get_redis
