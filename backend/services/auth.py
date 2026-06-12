@@ -1,4 +1,4 @@
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update
@@ -11,6 +11,9 @@ import secrets
 from core.redis_client import get_redis   
 from fastapi import FastAPI
 from fastapi_mail import FastMail, MessageSchema
+from fastapi.templating import Jinja2Templates
+templates = Jinja2Templates(directory="core")
+
 from core.email_config import configure_email_credentials
 
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
@@ -115,151 +118,21 @@ async def update_name(
     await invalidate_user_cache(target_user_id)
     return db_user
 
-async def get_ui(reset_password_link: str):
+
+async def get_ui(reset_password_link: str, request: Request):
     subject = "Reset Your Chatpaper Password"
 
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>Reset Your Password</title>
-    </head>
-    <body style="
-        margin:0;
-        padding:0;
-        background-color:#f4f7fb;
-        font-family:Arial, Helvetica, sans-serif;
-        color:#333333;
-    ">
-        <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 0;">
-            <tr>
-                <td align="center">
+    template = templates.get_template("email_format.html")
 
-                    <table width="600" cellpadding="0" cellspacing="0"
-                        style="
-                            background:#ffffff;
-                            border-radius:12px;
-                            overflow:hidden;
-                            box-shadow:0 2px 12px rgba(0,0,0,0.08);
-                        ">
-
-                        <!-- Header -->
-                        <tr>
-                            <td align="center"
-                                style="
-                                    background:#111827;
-                                    color:#ffffff;
-                                    padding:32px;
-                                    font-size:28px;
-                                    font-weight:bold;
-                                ">
-                                Chatpaper
-                            </td>
-                        </tr>
-
-                        <!-- Body -->
-                        <tr>
-                            <td style="padding:40px;">
-
-                                <h2 style="
-                                    margin-top:0;
-                                    color:#111827;
-                                ">
-                                    Reset Your Password
-                                </h2>
-
-                                <p style="
-                                    font-size:16px;
-                                    line-height:1.7;
-                                    color:#4b5563;
-                                ">
-                                    We received a request to reset the password
-                                    associated with your Chatpaper account.
-                                </p>
-
-                                <p style="
-                                    font-size:16px;
-                                    line-height:1.7;
-                                    color:#4b5563;
-                                ">
-                                    Click the button below to create a new password.
-                                </p>
-
-                                <div style="text-align:center; margin:35px 0;">
-                                    <a href="{reset_password_link}"
-                                       style="
-                                            background:#2563eb;
-                                            color:#ffffff;
-                                            text-decoration:none;
-                                            padding:14px 32px;
-                                            border-radius:8px;
-                                            font-size:16px;
-                                            font-weight:600;
-                                            display:inline-block;
-                                       ">
-                                        Reset Password
-                                    </a>
-                                </div>
-
-                                <p style="
-                                    font-size:14px;
-                                    color:#6b7280;
-                                    line-height:1.7;
-                                ">
-                                    This password reset link will expire automatically
-                                    for security reasons.
-                                </p>
-
-                                <p style="
-                                    font-size:14px;
-                                    color:#6b7280;
-                                    line-height:1.7;
-                                ">
-                                    If you did not request a password reset,
-                                    you can safely ignore this email.
-                                    No changes will be made to your account.
-                                </p>
-
-                                <hr style="
-                                    border:none;
-                                    border-top:1px solid #e5e7eb;
-                                    margin:30px 0;
-                                ">
-
-                            </td>
-                        </tr>
-
-                        <!-- Footer -->
-                        <tr>
-                            <td
-                                style="
-                                    background:#f9fafb;
-                                    padding:24px;
-                                    text-align:center;
-                                    color:#6b7280;
-                                    font-size:12px;
-                                "
-                            >
-                                © 2026 Chatpaper. All rights reserved.
-                                <br>
-                                Secure AI-powered document analysis and research platform.
-                            </td>
-                        </tr>
-
-                    </table>
-
-                </td>
-            </tr>
-        </table>
-    </body>
-    </html>
-    """
+    html_content = template.render(
+        request=request,
+        value=reset_password_link
+    )
 
     return subject, html_content
 
 
-async def request_password_reset(db: AsyncSession, reset_url: str, user: object) -> None:
+async def request_password_reset(db: AsyncSession, reset_url: str, user: object, request:Request) -> None:
     """send email logic function."""
 
     redis = get_redis()
@@ -274,7 +147,7 @@ async def request_password_reset(db: AsyncSession, reset_url: str, user: object)
     await redis.set(f"password_reset:{token}", int(user.id), ex=ttl_seconds)
     
     url = reset_url.format(token=token)
-    subject,email_format = await get_ui(url)
+    subject, email_format = await get_ui(url, request)
     conf = configure_email_credentials()
     
     message = MessageSchema(

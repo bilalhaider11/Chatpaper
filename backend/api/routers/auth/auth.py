@@ -124,7 +124,7 @@ async def forgot_password(
     frontend_base = (settings.frontend_url).rstrip("/")
     reset_url = f"{frontend_base}/reset-password?token={{token}}"
   
-    await auth_service.request_password_reset(db, reset_url, email_record)
+    await auth_service.request_password_reset(db, reset_url, email_record,request)
     return {
         "message": "If an account exists with that email, a password reset link has been sent.",
     }
