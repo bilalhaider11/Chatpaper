@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { exchangeOAuthCode, login, signup, tokenStore } from "../../api/axios";
 import { GoogleAuthButton } from "../../components/login/google_auth";
 import { isValidName, NAME_REQUIREMENTS, normalizeName } from "../../utils/Validations";
@@ -164,28 +164,35 @@ function Login({ onLoginSuccess }: LoginProps) {
               {errors.name && <p className="login-field-error">{errors.name}</p>}
             </div>
           )}
-          <div className="login-field-wrap">
-            <input
-              type="email"
-              placeholder="Email address"
-              className={`login-input${errors.email ? " login-input-error" : ""}`}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-            />
-            {errors.email && <p className="login-field-error">{errors.email}</p>}
-          </div>
-          <div className="login-field-wrap">
-            <input
-              type="password"
-              placeholder="Password"
-              className={`login-input${errors.password ? " login-input-error" : ""}`}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete={isLogin ? "current-password" : "new-password"}
-            />
-            {errors.password && <p className="login-field-error">{errors.password}</p>}
-          </div>
+          <input
+            type="email"
+            placeholder="Email address"
+            className="login-input"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoComplete="email"
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            className={`login-input${errors.password ? " login-input-error" : ""}`}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            autoComplete={isLogin ? "current-password" : "new-password"}
+          />
+          {isLogin && (
+            <p className="login-forgot-link">
+              <Link to="/forgot-password">Forgot password?</Link>
+            </p>
+          )}
+          {!isLogin && (
+            <>
+              <p className="login-hint">{NAME_REQUIREMENTS}</p>
+              <p className="login-hint">{PASSWORD_REQUIREMENTS}</p>
+            </>
+          )}
         </div>
 
         {errors.general && <p className="login-error">{errors.general}</p>}

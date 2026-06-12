@@ -135,11 +135,6 @@ function Home({ onLogout }: HomeProps) {
     return () => clearInterval(id);
   }, [panel]);
 
-  const logout = () => {
-    tokenStore.clear();
-    onLogout(); // sets isAuthenticated=false in App → route guard redirects to /login
-  };
-
   if (loading) return <div className="home-page">Loading…</div>;
 
   const renderPanel = () => {
@@ -173,10 +168,10 @@ function Home({ onLogout }: HomeProps) {
 
       <nav className="home-navbar">
         <img src={logo} alt="Chatpaper" className="home-logo" />
-        <button type="button" className="home-nav-logout" onClick={logout}>
+        <Link to="/logout" className="home-nav-logout">
           <LogoutIcon width={14} height={14} />
           Logout
-        </button>
+        </Link>
       </nav>
 
       <div className="home-content">

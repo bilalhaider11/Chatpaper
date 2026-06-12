@@ -93,6 +93,28 @@ export async function fetchCurrentUser() {
   return response.data;
 }
 
+export async function requestPasswordReset(email: string) {
+  const response = await api.post<{ message: string }>("/auth/forgot-password", {
+    email,
+  });
+  return response.data;
+}
+
+export async function validatePasswordResetToken(token: string) {
+  const response = await api.get<{ message: string }>("/auth/reset-password/validate", {
+    params: { token },
+  });
+  return response.data;
+}
+
+export async function resetPassword(token: string, newPassword: string) {
+  const response = await api.post<{ access_token: string; token_type: string }>(
+    "/auth/reset-password",
+    { token, new_password: newPassword }
+  );
+  return response.data;
+}
+
 export function toFileUrl(fileId: number) {
   return `${API_BASE_URL}/files/${fileId}/download`;
 }
