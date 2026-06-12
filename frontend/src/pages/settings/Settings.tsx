@@ -226,11 +226,6 @@ function Settings({ onLogout }: SettingsProps) {
     }
   };
 
-  const logout = () => {
-    tokenStore.clear();
-    onLogout();
-  };
-
   if (loading) {
     return <div className="settings-page">Loading…</div>;
   }
@@ -259,10 +254,10 @@ function Settings({ onLogout }: SettingsProps) {
         </nav>
 
         <div className="settings-sidebar-footer">
-          <button type="button" className="sidebar-logout" onClick={logout}>
+          <Link to="/logout" className="sidebar-logout">
             <LogoutIcon width={15} height={15} />
             Logout
-          </button>
+          </Link>
         </div>
       </aside>
 

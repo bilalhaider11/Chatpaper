@@ -110,11 +110,6 @@ function Files({ onLogout }: { onLogout: () => void }) {
     setShowUpload(false);
   };
 
-  const logout = () => {
-    tokenStore.clear();
-    onLogout();
-  };
-
   const handleChatClick = async (fileId: number) => {
     try {
       const convs = await getConversationList();
@@ -182,10 +177,10 @@ function Files({ onLogout }: { onLogout: () => void }) {
         </Link>
         <div className="files-nav-right">
           <Link to="/chat" className="files-nav-link">Chat</Link>
-          <button type="button" className="files-nav-logout" onClick={logout}>
+          <Link to="/logout" className="files-nav-logout">
             <LogoutIcon width={14} height={14} />
             Logout
-          </button>
+          </Link>
         </div>
       </nav>
 

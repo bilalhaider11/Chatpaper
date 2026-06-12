@@ -386,11 +386,6 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
   };
 
   // System messages still use HTTP (no streaming pattern needed)
-  const logout = () => {
-    tokenStore.clear();
-    onLogout();
-  };
-
   const handleDelete = async (id: number) => {
     await deleteConversationList(id);
     const list = await loadConversationList();
@@ -568,10 +563,10 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
             <SettingsIcon width={15} height={15} />
             Settings
           </Link>
-          <button type="button" className="sidebar-logout" onClick={logout}>
+          <Link to="/logout" className="sidebar-logout">
             <LogoutIcon width={15} height={15} />
             Logout
-          </button>
+          </Link>
         </div>
       </aside>
 
