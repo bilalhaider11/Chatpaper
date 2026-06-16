@@ -2,7 +2,7 @@ from datetime import timedelta
 from typing import Annotated
 from sqlalchemy import update
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -108,3 +108,57 @@ async def update_name(
 )
 async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
     return await auth_service.delete_user(db, user_id)
+
+
+@router.post("/forgot-password", response_model=schema_auth.MessageResponse)
+async def forgot_password(
+    request: Request,
+    payload: schema_auth.ForgotPassword,
+    db: AsyncSession = Depends(get_db),
+):
+    email_record = await auth_service.get_user_by_email(db, payload.email)
+    
+    if email_record is None:
+        return{"message": "Email does not exist in record, create account or correct your email"}
+    
+    frontend_base = (settings.frontend_url).rstrip("/")
+    reset_url = f"{frontend_base}/reset-password?token={{token}}"
+  
+    await auth_service.request_password_reset(db, reset_url, email_record,request)
+    return {
+        "message": "If an account exists with that email, a password reset link has been sent.",
+    }
+
+
+@router.post("/reset-password", response_model=schema_auth.Token)
+async def reset_password(
+    request: Request,
+    payload: schema_auth.ResetPassword,
+    db: AsyncSession = Depends(get_db),
+):
+    user = await auth_service.reset_password_with_token(db, payload.token, payload.new_password)
+    role = user.role.value if hasattr(user.role, "value") else user.role
+   
+    access_token = auth_functions.create_access_token(
+        data={"id": user.id, "email": user.email, "role": role},
+        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.get("/reset-password/validate")
+async def validate_reset_password_token(
+    token: str = Query(...),
+):
+    is_valid = await auth_service.validate_password_reset_token(token)
+
+    if not is_valid:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired reset token",
+        )
+
+    return {
+        "valid": True,
+        "message": "Token is valid",
+    }

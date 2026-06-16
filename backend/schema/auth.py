@@ -77,6 +77,28 @@ class UpdateName(BaseModel):
 
 
 
+class ForgotPassword(BaseModel):
+    email: EmailStr
+
+
+class ResetPassword(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        return validate_password_strength(value)
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+class ReSetPassword(BaseModel):
+    tokem:str
+    new_password:str= Field(min_lenght=8)

@@ -1,11 +1,20 @@
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update
 from core.password import hash_password, verify_password
 from models.auth import User
 from schema import auth as schema_auth
+from core.config import settings
+from fastapi.responses import HTMLResponse
+import secrets
+from core.redis_client import get_redis   
+from fastapi import FastAPI
+from fastapi_mail import FastMail, MessageSchema
+from fastapi.templating import Jinja2Templates
+templates = Jinja2Templates(directory="core")
 
+from core.email_config import configure_email_credentials
 
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
     result = await db.execute(
@@ -108,6 +117,102 @@ async def update_name(
     from core.auth import invalidate_user_cache
     await invalidate_user_cache(target_user_id)
     return db_user
+
+
+async def get_ui(reset_password_link: str, request: Request):
+    subject = "Reset Your Chatpaper Password"
+
+    template = templates.get_template("email_format.html")
+
+    html_content = template.render(
+        request=request,
+        value=reset_password_link
+    )
+
+    return subject, html_content
+
+
+async def request_password_reset(db: AsyncSession, reset_url: str, user: object, request:Request) -> None:
+    """send email logic function."""
+
+    redis = get_redis()
+    if redis is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Auth service temporarily unavailable. Please try again.",
+        )
+
+    token = secrets.token_urlsafe(32)
+    ttl_seconds = settings.email_token_ttl_in_seconds
+    await redis.set(f"password_reset:{token}", int(user.id), ex=ttl_seconds)
+    
+    url = reset_url.format(token=token)
+    subject, email_format = await get_ui(url, request)
+    conf = configure_email_credentials()
+    
+    message = MessageSchema(
+       subject=subject,
+       recipients=[user.email],
+       body=email_format,
+       subtype="html"
+    )
+    try:
+        fm = FastMail(conf)
+        await fm.send_message(message)
+    except Exception as e:
+        raise
+        
+
+async def validate_password_reset_token(token: str) -> bool:
+    from core.redis_client import get_redis
+
+    redis = get_redis()
+    if redis is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Auth service temporarily unavailable. Please try again.",
+        )
+    return await redis.exists(f"password_reset:{token}") == 1
+
+
+async def reset_password_with_token(
+    db: AsyncSession,
+    token: str,
+    new_password: str,
+) -> User:
+
+    redis = get_redis()
+    if redis is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Auth service temporarily unavailable. Please try again.",
+        )
+
+    user_id_raw = await redis.getdel(f"password_reset:{token}")
+    if user_id_raw is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+
+    user_id = int(user_id_raw)
+    db_user = await get_user_by_id(db, user_id)
+
+    update_values: dict = {"password": hash_password(new_password)}
+    if db_user.auth_provider == "google":
+        update_values["auth_provider"] = "password"
+
+    await db.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(**update_values)
+    )
+    await db.commit()
+    await db.refresh(db_user)
+    from core.auth import _cache_user, invalidate_user_cache
+
+
+    await invalidate_user_cache(user_id)
+    await _cache_user(db_user)
+    return db_user
+
 
 async def delete_user(db: AsyncSession, user_id: int) -> dict:
     db_user = await get_user_by_id(db, user_id)

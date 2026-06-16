@@ -17,6 +17,16 @@ class Settings(BaseModel):
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
     
     chat_data_ttl_seconds:int = int(os.getenv("CHAT_DATA_TTL_SECONDS",'3600'))
+    #email token for forgot password TTL
+    email_token_ttl_in_seconds:int = int(os.getenv("EMAIL_TOKEN_TTL_IN_SECONDS",600))
+    mail_username:str=os.getenv("MAIL_USERNAME")
+    mail_password:str=os.getenv("MAIL_PASSWORD")
+    mail_from:str=os.getenv("MAIL_FROM")
+    mail_port:int=int(os.getenv("MAIL_PORT",587))
+    mail_server:str=os.getenv("MAIL_SERVER","smtp.gmail.com")
+    mail_starttls: bool =True
+    mail_ssl_tls: bool =False
+    use_credentials: bool =True
 
     # Set true in multi-worker production: startup aborts if Redis is unreachable.
     require_redis: bool = os.getenv("REQUIRE_REDIS", "false").lower() == "true"

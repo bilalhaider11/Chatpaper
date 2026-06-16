@@ -7,6 +7,7 @@ import FileUpload from "../../components/fileUpload/FileUpload";
 import { DeleteIcon, EditIcon, ErrorIcon } from "../../components/icons/ActionIcons";
 import { FileIcon, GlobeIcon, LogoutIcon, SettingsIcon } from "../../components/icons/Icons";
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
+import { useLogout } from "../../hooks/useLogout";
 import { FileRecord, getFiles } from "../../services/files_api";
 import {
   ChatWsEvent,
@@ -26,6 +27,7 @@ const PROCESSING_KEY = "chatpaper_processing_file";
 function Chatbot({ onLogout }: { onLogout: () => void }) {
   const { conversationId: urlId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
+  const logout = useLogout(onLogout);
   const location = useLocation();
   const openUploadOnLoad = (location.state as { openUpload?: boolean } | null)?.openUpload === true;
 
@@ -386,11 +388,6 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
   };
 
   // System messages still use HTTP (no streaming pattern needed)
-  const logout = () => {
-    tokenStore.clear();
-    onLogout();
-  };
-
   const handleDelete = async (id: number) => {
     await deleteConversationList(id);
     const list = await loadConversationList();

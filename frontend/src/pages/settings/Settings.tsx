@@ -10,6 +10,7 @@ import {
   User,
 } from "../../api/axios";
 import { ChatBubbleIcon, FileIcon, LogoutIcon, SettingsIcon } from "../../components/icons/Icons";
+import { useLogout } from "../../hooks/useLogout";
 import { isValidName, NAME_REQUIREMENTS, normalizeName } from "../../utils/Validations";
 import { isValidPassword, PASSWORD_REQUIREMENTS } from "../../utils/Validations";
 import "./Settings.css";
@@ -20,6 +21,7 @@ type SettingsProps = {
 
 function Settings({ onLogout }: SettingsProps) {
   const navigate = useNavigate();
+  const logout = useLogout(onLogout);
   const [user, setUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
@@ -224,11 +226,6 @@ function Settings({ onLogout }: SettingsProps) {
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const logout = () => {
-    tokenStore.clear();
-    onLogout();
   };
 
   if (loading) {

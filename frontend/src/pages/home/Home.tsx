@@ -5,6 +5,7 @@ import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
 import { FileRecord, getFiles } from "../../services/files_api";
 import FileUpload from "../../components/fileUpload/FileUpload";
 import { LogoutIcon } from "../../components/icons/Icons";
+import { useLogout } from "../../hooks/useLogout";
 import "./Home.css";
 
 type HomeProps = {
@@ -83,6 +84,7 @@ function FilesPanel() {
 
 function Home({ onLogout }: HomeProps) {
   const navigate = useNavigate();
+  const logout = useLogout(onLogout);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [panel, setPanel] = useState<Panel>({ kind: "loading" });
@@ -134,11 +136,6 @@ function Home({ onLogout }: HomeProps) {
     }, 3000);
     return () => clearInterval(id);
   }, [panel]);
-
-  const logout = () => {
-    tokenStore.clear();
-    onLogout(); // sets isAuthenticated=false in App → route guard redirects to /login
-  };
 
   if (loading) return <div className="home-page">Loading…</div>;
 
