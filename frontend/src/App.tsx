@@ -21,18 +21,19 @@ function App() {
   );
 
   const handleLogout = () => setIsAuthenticated(false);
+  const hasSession = isAuthenticated && Boolean(tokenStore.getToken());
 
   return (
     <Routes>
       {/* Public landing page — always visible; authenticated users redirected to dashboard */}
       <Route
         path="/"
-        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Landing />}
+        element={hasSession ? <Navigate to="/dashboard" replace /> : <Landing />}
       />
       <Route
         path="/login"
         element={
-          isAuthenticated ? (
+          hasSession ? (
             <Navigate to="/dashboard" replace />
           ) : (
             <Login onLoginSuccess={() => setIsAuthenticated(true)} />
@@ -42,13 +43,13 @@ function App() {
       <Route
         path="/forgot-password"
         element={
-          isAuthenticated ? <Navigate to="/dashboard" replace /> : <ForgotPassword />
+          hasSession ? <Navigate to="/dashboard" replace /> : <ForgotPassword />
         }
       />
       <Route
         path="/reset-password"
         element={
-          isAuthenticated ? (
+          hasSession ? (
             <Navigate to="/dashboard" replace />
           ) : (
             <ResetPassword onLoginSuccess={() => setIsAuthenticated(true)} />
@@ -103,7 +104,7 @@ function App() {
       {/* Authenticated users hitting unknown routes go to dashboard; everyone else sees 404 */}
       <Route
         path="*"
-        element={isAuthenticated ? <NotFound /> : <Navigate to="/login" replace />}
+        element={hasSession ? <NotFound /> : <Navigate to="/login" replace />}
       />
     </Routes>
   );

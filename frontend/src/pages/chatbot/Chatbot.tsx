@@ -7,6 +7,7 @@ import FileUpload from "../../components/fileUpload/FileUpload";
 import { DeleteIcon, EditIcon, ErrorIcon } from "../../components/icons/ActionIcons";
 import { FileIcon, GlobeIcon, LogoutIcon, SettingsIcon } from "../../components/icons/Icons";
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
+import { useLogout } from "../../hooks/useLogout";
 import { FileRecord, getFiles } from "../../services/files_api";
 import {
   ChatWsEvent,
@@ -26,6 +27,7 @@ const PROCESSING_KEY = "chatpaper_processing_file";
 function Chatbot({ onLogout }: { onLogout: () => void }) {
   const { conversationId: urlId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
+  const logout = useLogout(onLogout);
   const location = useLocation();
   const openUploadOnLoad = (location.state as { openUpload?: boolean } | null)?.openUpload === true;
 
@@ -563,10 +565,10 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
             <SettingsIcon width={15} height={15} />
             Settings
           </Link>
-          <Link to="/logout" className="sidebar-logout">
+          <button type="button" className="sidebar-logout" onClick={logout}>
             <LogoutIcon width={15} height={15} />
             Logout
-          </Link>
+          </button>
         </div>
       </aside>
 

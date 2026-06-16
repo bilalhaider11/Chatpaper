@@ -8,6 +8,7 @@ import { deleteFile, downloadFile, FileRecord, getFiles } from "../../services/f
 import { getConversationList } from "../../services/conversation_api";
 import { ACCEPTED_FILE_TYPES } from "../../services/file_config";
 import { ChatBubbleIcon, CheckCircleIcon, DownloadIcon, FileIcon, LogoutIcon, SearchIcon, TrashIcon, UploadIcon } from "../../components/icons/Icons";
+import { useLogout } from "../../hooks/useLogout";
 import "./Files.css";
 
 function fileIcon(filename: string) {
@@ -44,6 +45,7 @@ function formatSize(bytes: number): string {
 
 function Files({ onLogout }: { onLogout: () => void }) {
   const navigate = useNavigate();
+  const logout = useLogout(onLogout);
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showUpload, setShowUpload] = useState(false);
@@ -177,10 +179,10 @@ function Files({ onLogout }: { onLogout: () => void }) {
         </Link>
         <div className="files-nav-right">
           <Link to="/chat" className="files-nav-link">Chat</Link>
-          <Link to="/logout" className="files-nav-logout">
+          <button type="button" className="files-nav-logout" onClick={logout}>
             <LogoutIcon width={14} height={14} />
             Logout
-          </Link>
+          </button>
         </div>
       </nav>
 
