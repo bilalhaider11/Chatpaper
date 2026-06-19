@@ -1,4 +1,4 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 
 type ProtectedRouteProps = {
   isAuthenticated: boolean;
@@ -6,5 +6,12 @@ type ProtectedRouteProps = {
 };
 
 export default function ProtectedRoute({ isAuthenticated, children }: ProtectedRouteProps) {
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+  const location = useLocation();
+
+  if (isAuthenticated) {
+    return <>{children}</>;
+  }
+
+  const next = `${location.pathname}${location.search}`;
+  return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
 }

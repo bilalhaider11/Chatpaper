@@ -111,6 +111,26 @@ export async function editConversationListTitle(list_id: number, title: string) 
   return response.data;
 }
 
+export async function shareConversation(conversationListId: number) {
+  const response = await api.post<{ share_url: string; shared_id: number }>(
+    `/conversation/share/${conversationListId}`
+  );
+  return response.data;
+}
+
+export type ImportSharedConversationResponse = {
+  conversation_list: ConversationListItem;
+  already_imported: boolean;
+  messages_imported: number;
+};
+
+export async function importSharedConversation(sharedId: number) {
+  const response = await api.get<ImportSharedConversationResponse>(
+    `/conversation/shared/${sharedId}`
+  );
+  return response.data;
+}
+
 export type Citation = {
   file_id: number;
   filename: string;

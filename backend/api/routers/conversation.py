@@ -21,6 +21,8 @@ from schema.conversation import (
     ConversationCreateRequest,
     ConversationListResponse,
     ConversationResponse,
+    ImportSharedConversationResponse,
+    ShareConversationResponse,
 )
 from services import conversation as conversation_service
 from services import rag as rag_service
@@ -124,6 +126,23 @@ async def get_conversation(
     await _get_owned_convo(db, chat_list_id, current_user)
     return await conversation_service.get_conversations(chat_list_id, db, limit=limit, offset=offset)
 
+@router.post("/share/{conversation_list_id}", response_model=ShareConversationResponse)
+async def share_conversation(
+    conversation_list_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_owned_convo(db, conversation_list_id, current_user)
+    return await conversation_service.mark_chat_shared(conversation_list_id, current_user, db)
+
+
+@router.get("/shared/{shared_conversation_id}", response_model=ImportSharedConversationResponse)
+async def get_shared_conversation(
+    shared_conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await conversation_service.get_chat_shared(shared_conversation_id, current_user, db)
 
 @router.delete("/delete_list/{list_id}")
 async def delete_conversation_list(

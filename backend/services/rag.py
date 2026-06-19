@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import re
 
 try:
@@ -24,6 +25,12 @@ from schema.chat import Citation
 from services.retrieval import RetrievedContext, retrieve
 
 _CITATION_RE = re.compile(r"\[(\d+)\]")
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _HistoryTurn:
+    user_type: str
+    statement: str
 
 _PROMPT_HEADER = (
     "You are a research assistant. Answer using ONLY the document context below. "
@@ -74,13 +81,21 @@ def _system_prompt(contexts: list[RetrievedContext]) -> str:
     return _PROMPT_HEADER + "\n\n---\n\n".join(selected)
 
 
-def _truncate_history(history: list, max_chars: int) -> list:
+def _truncate_history(history: list[_HistoryTurn], max_chars: int) -> list[_HistoryTurn]:
     while history:
-        total = sum(len(t.statement) for t in history)
+        total = sum(len(turn.statement) for turn in history)
         if total <= max_chars:
             break
         history = history[1:]
     return history
+
+
+def _materialize_history(messages: list) -> list[_HistoryTurn]:
+    """Copy ORM rows to plain values before retrieval (retrieve may rollback the session)."""
+    return [
+        _HistoryTurn(user_type=turn.user_type, statement=turn.statement)
+        for turn in messages
+    ]
 
 
 def extract_citations(answer: str, contexts: list[RetrievedContext]) -> list[Citation]:
@@ -108,16 +123,13 @@ async def prepare(
     use_propositions: bool = False,
 ) -> tuple[list, list[RetrievedContext]]:
     """Fetch history, retrieve context, build LangChain messages list."""
-    history_result = await db.execute(
-        select(Conversation)
-        .where(Conversation.chat_id == convo.id)
-        .order_by(Conversation.created_at.desc())
-        .limit(settings.chat_history_turns)
-    )
-    history = list(history_result.scalars().all())
-    history.reverse()
-    history = _truncate_history(history, settings.chat_history_max_chars)
+    from services.conversation import get_merged_messages
 
+    all_history = await get_merged_messages(convo.id, db)
+    history = _truncate_history(
+        _materialize_history(all_history[-settings.chat_history_turns :]),
+        settings.chat_history_max_chars,
+    )
     match convo.conversation_type:
         case "per_file":
             file_ids = [convo.file_id] if convo.file_id else None
@@ -137,6 +149,8 @@ async def prepare(
     contexts = await retrieve(
         query=retrieval_query,
         user_id=convo.user_id,
+        conversation_type=convo.conversation_type,
+        conversationlist_id=convo.id,
         db=db,
         file_ids=file_ids,
         top_k=top_k,

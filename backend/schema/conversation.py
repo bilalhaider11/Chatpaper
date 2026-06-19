@@ -48,3 +48,14 @@ class ConversationResponse(BaseModel):
 class ChatWsSendPayload(BaseModel):
     action: str = "send"
     statement: str
+
+
+class ShareConversationResponse(BaseModel):
+    share_url: str
+    shared_id: int
+
+
+class ImportSharedConversationResponse(BaseModel):
+    conversation_list: ConversationListResponse
+    already_imported: bool
+    messages_imported: int

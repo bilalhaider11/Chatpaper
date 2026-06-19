@@ -62,6 +62,7 @@ redis>=5.0.0
 aio-pika>=9.0.0
 
 # ── LLM / Embeddings ─────────────────────────────────────────────────────────
+requests>=2.31.0
 openai>=1.0.0
 tiktoken>=0.7.0
 
@@ -80,3 +81,4 @@ pytest-asyncio>=0.23.0
 watchdog>=4.0.0
 
 fastapi-mail>=1.6.4
+sentence-transformers>=2.7.0

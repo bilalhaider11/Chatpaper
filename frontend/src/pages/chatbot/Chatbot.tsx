@@ -20,6 +20,7 @@ import {
   getConversation,
   getConversationList,
   normalizeUserType,
+  shareConversation,
 } from "../../services/conversation_api";
 
 const PROCESSING_KEY = "chatpaper_processing_file";
@@ -53,6 +54,10 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
   const [loading, setLoading] = useState(true);
   const [creatingChat, setCreatingChat] = useState(false);
   const [wsError, setWsError] = useState<string | null>(null);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
 
   const isStreaming = liveMessages.some((m) => m.streaming);
 
@@ -387,6 +392,40 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
     }
   };
 
+  const handleShare = async () => {
+    if (!selectedConversationId) return;
+
+    setShareLoading(true);
+    setShareError(null);
+    setShareCopied(false);
+
+    try {
+      const result = await shareConversation(selectedConversationId);
+      setShareUrl(result.share_url);
+    } catch {
+      setShareError("Unable to create a share link. Please try again.");
+      setShareUrl(null);
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const closeShareModal = () => {
+    setShareUrl(null);
+    setShareError(null);
+    setShareCopied(false);
+  };
+
+  const copyShareLink = async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+    } catch {
+      setShareError("Could not copy link. Select and copy it manually.");
+    }
+  };
+
   // System messages still use HTTP (no streaming pattern needed)
   const handleDelete = async (id: number) => {
     await deleteConversationList(id);
@@ -578,6 +617,16 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
             <h1>{activeConversation?.conversation_title ?? "Assistant"}</h1>
             <span>{user?.name || user?.email}</span>
           </div>
+          <div className="chatbot-header-share">
+            <button
+              type="button"
+              className="share-btn"
+              onClick={handleShare}
+              disabled={!selectedConversationId || shareLoading}
+            >
+              {shareLoading ? "Sharing…" : "Share"}
+            </button>
+          </div>
           <div className="chatbot-header-actions">
             {wsStatus === "failed" && (
               <span className="ws-status-badge ws-failed">Connection lost</span>
@@ -731,6 +780,41 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
           </form>
         </footer>
       </main>
+
+      {(shareUrl || shareError) && !shareLoading ? (
+        <div className="share-modal-backdrop" onClick={closeShareModal} role="presentation">
+          <div
+            className="share-modal"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-labelledby="share-modal-title"
+          >
+            <h2 id="share-modal-title">Share conversation</h2>
+            <p className="share-modal-description">
+              Anyone with this link can import a snapshot of this conversation into their account.
+              Each share creates a new link reflecting the messages at that moment.
+            </p>
+            {shareUrl ? (
+              <div className="share-modal-link-row">
+                <input
+                  className="share-modal-link-input"
+                  type="text"
+                  readOnly
+                  value={shareUrl}
+                  onFocus={(event) => event.target.select()}
+                />
+                <button type="button" className="share-modal-copy-btn" onClick={() => void copyShareLink()}>
+                  {shareCopied ? "Copied" : "Copy"}
+                </button>
+              </div>
+            ) : null}
+            {shareError ? <p className="share-modal-error">{shareError}</p> : null}
+            <button type="button" className="share-modal-close-btn" onClick={closeShareModal}>
+              Done
+            </button>
+          </div>
+        </div>
+      ) : null}
 
     </div>
   );

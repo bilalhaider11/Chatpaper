@@ -1,11 +1,16 @@
 from fastapi import HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.conversation import Conversation, ConversationList
+from models.conversation import (
+    Conversation,
+    ConversationList,
+    CombinedSharedConversationImport,
+)
 from models.file_model import FileRecord
 from schema.conversation import ConversationCreateRequest
 from services.chat_cache import get_active_streams, get_pending_messages
+from core.config import settings
 
 
 async def create_conversation_list(current_user, body: ConversationCreateRequest, db: AsyncSession) -> ConversationList:
@@ -51,19 +56,142 @@ async def update_conversation_title(title: str, conversation_id: int, user_id: i
     await session.commit()
     return {"Title": "Updated Successfully"}
 
+async def mark_chat_shared(conversation_list_id: int, user, db: AsyncSession) -> dict:
+    
+    message_count = await db.scalar(
+        select(func.count(Conversation.id)).where(Conversation.chat_id == conversation_list_id)
+    )
+    
+    combined_shared_conversation = CombinedSharedConversationImport(
+        limit=message_count or 0,
+        shared_user_id=user.id,
+        shared_chat_id=conversation_list_id
+    )
+    db.add(combined_shared_conversation)
+    await db.commit()
+    await db.refresh(combined_shared_conversation)
+
+    share_url = f"{settings.frontend_url}/conversation/share/{combined_shared_conversation.id}"
+    return {"share_url": share_url, "shared_id": combined_shared_conversation.id}
+
+
+async def get_merged_messages(
+    chat_list_id: int,
+    db: AsyncSession,
+) -> list[Conversation]:
+
+    result = await db.execute(
+        select(
+            ConversationList,
+            CombinedSharedConversationImport,
+        )
+        .outerjoin(
+            CombinedSharedConversationImport,
+            CombinedSharedConversationImport.id
+            == ConversationList.shared_conversation_id,
+        )
+        .where(ConversationList.id == chat_list_id)
+    )
+
+    row = result.first()
+
+    if not row:
+        return []
+
+    convo_list, shared = row
+
+    chat_ids = [chat_list_id]
+
+    if shared:
+        chat_ids.append(shared.shared_chat_id)
+
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.chat_id.in_(chat_ids))
+        .order_by(Conversation.created_at.asc())
+    )
+
+    conversations = list(result.scalars().all())
+
+    if not shared:
+        return conversations
+
+    shared_messages = [
+        c for c in conversations
+        if c.chat_id == shared.shared_chat_id
+    ][: shared.limit]
+
+    own_messages = [
+        c for c in conversations
+        if c.chat_id == chat_list_id
+    ]
+
+    merged = shared_messages + own_messages
+    merged.sort(key=lambda x: x.created_at)
+
+    return merged
+
+
+async def get_chat_shared(shared_id: int, user, db: AsyncSession) -> dict:
+    result = await db.execute(
+        select(CombinedSharedConversationImport).where(CombinedSharedConversationImport.id == shared_id)
+    )
+
+    shared_record = result.scalars().first()
+   
+    if not shared_record:
+        raise HTTPException(status_code=404, detail="Shared conversation not found")
+
+    existing_import = await db.execute(
+        select(ConversationList).where(
+            ConversationList.shared_conversation_id == shared_id,
+            ConversationList.user_id == user.id,
+            ConversationList.is_active == True,  # noqa: E712
+        )
+    )
+    imported_list = existing_import.scalars().first()
+   
+    if imported_list:
+        return {
+            "conversation_list": imported_list,
+            "already_imported": True,
+            "messages_imported": shared_record.limit,
+        }
+
+    source_result = await db.execute(
+        select(ConversationList).where(ConversationList.id == shared_record.shared_chat_id)
+    )
+    source_list = source_result.scalars().first()
+    if not source_list:
+        raise HTTPException(status_code=404, detail="Original conversation no longer exists")
+
+    new_conversation_list = ConversationList(
+        user_id=user.id,
+        conversation_title=source_list.conversation_title,
+        conversation_type="per_file",
+        is_active=True,
+        file_id=source_list.file_id,
+        shared_conversation_id=shared_id,
+    )
+    db.add(new_conversation_list)
+    await db.commit()
+    await db.refresh(new_conversation_list)
+
+    await db.commit()
+
+    return {
+        "conversation_list": new_conversation_list,
+        "already_imported": False,
+        "messages_imported": shared_record.limit,
+    }
+
 
 async def get_conversations(chat_list_id, db: AsyncSession, limit: int = 50, offset: int = 0):
     if not chat_list_id:
         raise HTTPException(status_code=400, detail="Chat does not exist")
 
-    result = await db.execute(
-        select(Conversation)
-        .where(Conversation.chat_id == chat_list_id)
-        .order_by(Conversation.created_at.asc())
-        .limit(limit)
-        .offset(offset)
-    )
-    conversations = list(result.scalars().all())
+    conversations = await get_merged_messages(chat_list_id, db)
+    conversations = conversations[offset : offset + limit]
 
     # Pending and in-flight stream messages are the "leading edge" of the conversation;
     # only attach them on the first page to avoid duplicating them across paginated requests.
