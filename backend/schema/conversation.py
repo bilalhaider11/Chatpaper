@@ -20,6 +20,7 @@ class ConversationListResponse(ConversationListBase):
     is_active: bool
     conversation_type: str
     file_id: int | None = None
+    shared_conversation_id: int | None = None
     model_config = ConfigDict(from_attributes=True)
 
 

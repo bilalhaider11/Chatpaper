@@ -97,7 +97,7 @@ async def _resolve_retrieval_scope(
 
     if file_ids is None and conversation_type == "global":
         scoped_file_ids = await _global_accessible_file_ids(user_id, db)
-    elif file_ids is None and conversation_type =="per_file":
+    elif file_ids is None and conversation_type =="shared global":
         scoped_file_ids = await all_files_when_shared_global(user_id,conversationlist_id, db)
     else:
         scoped_file_ids = file_ids

@@ -60,13 +60,61 @@
     margin-bottom: 12px;
 }
 
-.global-conversation-list {
+.global-conversation-list,
+.shared-conversation-list {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    margin-bottom: 12px;
-    max-height: 35vh;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.shared-conversation-list::-webkit-scrollbar,
+.conversation-list--pane::-webkit-scrollbar {
+    width: 6px;
+}
+
+.shared-conversation-list::-webkit-scrollbar-thumb,
+.conversation-list--pane::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+}
+
+.sidebar-header {
+    flex-shrink: 0;
+}
+
+.sidebar-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-user-pane,
+.sidebar-shared-pane {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.sidebar-user-pane {
+    padding-bottom: 4px;
+}
+
+.sidebar-shared-pane {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 4px;
+}
+
+.sidebar-empty--compact {
+    padding: 6px 10px 10px;
 }
 
 .new-chat-btn {
@@ -149,13 +197,19 @@
 }
 
 .conversation-list {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
     display: flex;
     flex-direction: column;
     gap: 4px;
     scrollbar-width: none;
+}
+
+.conversation-list--pane {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
 }
 
 .conversation-list::-webkit-scrollbar {
@@ -324,6 +378,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+    flex-shrink: 0;
     margin-top: 12px;
     padding-top: 12px;
     border-top: 1px solid rgba(60, 107, 146, 0.08);

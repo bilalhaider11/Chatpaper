@@ -25,6 +25,10 @@ import {
 
 const PROCESSING_KEY = "chatpaper_processing_file";
 
+function isImportedConversation(c: ConversationListItem) {
+  return c.conversation_type === "shared_global" || c.shared_conversation_id != null;
+}
+
 function Chatbot({ onLogout }: { onLogout: () => void }) {
   const { conversationId: urlId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
@@ -93,13 +97,23 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
     return [...persisted, ...live];
   }, [messages, liveMessages]);
 
-  const globalConversations = useMemo(
-    () => conversations.filter((c) => c.conversation_type === "global"),
+  const userConversations = useMemo(
+    () =>
+      conversations.filter(
+        (c) =>
+          (c.conversation_type === "global" || c.conversation_type === "per_file") &&
+          c.shared_conversation_id == null
+      ),
     [conversations]
   );
 
-  const fileConversations = useMemo(
-    () => conversations.filter((c) => c.conversation_type !== "global"),
+  const sharedConversations = useMemo(
+    () => conversations.filter(isImportedConversation),
+    [conversations]
+  );
+
+  const globalConversations = useMemo(
+    () => conversations.filter((c) => c.conversation_type === "global"),
     [conversations]
   );
 
@@ -481,6 +495,9 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
   const activeConversation = conversations.find(
     (item) => item.id === selectedConversationId
   );
+  const isActiveSharedConversation = activeConversation
+    ? isImportedConversation(activeConversation)
+    : false;
 
   const renderConversationItem = (conversation: ConversationListItem) => (
     <div
@@ -558,46 +575,56 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="chatbot-page">
       <aside className="chatbot-sidebar">
-        <Link to="/dashboard" className="sidebar-brand">
-          <img src={logo} alt="" className="sidebar-icon" />
-          <span className="sidebar-brand-name">Chatpaper</span>
-        </Link>
-        
-        <div className="sidebar-actions">
-          <button
-            type="button"
-            className="new-chat-btn"
-            onClick={() => void handleStartChat()}
-            disabled={creatingChat}
-          >
-            + New Chat
-          </button>
-          <button
-            type="button"
-            className="global-chat-btn"
-            onClick={() => void handleCreateGlobalChat()}
-            disabled={creatingChat || globalConversations.length > 0}
-            title={globalConversations.length > 0 ? "A global conversation already exists" : undefined}
-          >
-            Global Chat
-          </button>
+        <div className="sidebar-header">
+          <Link to="/dashboard" className="sidebar-brand">
+            <img src={logo} alt="" className="sidebar-icon" />
+            <span className="sidebar-brand-name">Chatpaper</span>
+          </Link>
+
+          <div className="sidebar-actions">
+            <button
+              type="button"
+              className="new-chat-btn"
+              onClick={() => void handleStartChat()}
+              disabled={creatingChat}
+            >
+              + New Chat
+            </button>
+            <button
+              type="button"
+              className="global-chat-btn"
+              onClick={() => void handleCreateGlobalChat()}
+              disabled={creatingChat || globalConversations.length > 0}
+              title={globalConversations.length > 0 ? "A global conversation already exists" : undefined}
+            >
+              Global Chat
+            </button>
+          </div>
         </div>
 
-        <div className="sidebar-section-label">Conversations</div>
-        {globalConversations.length > 0 ? (
-          <nav className="global-conversation-list">
-            {globalConversations.map(renderConversationItem)}
-          </nav>
-        ) : null}
+        <div className="sidebar-body">
+          <div className="sidebar-user-pane">
+            <div className="sidebar-section-label">Conversations</div>
+            <nav className="conversation-list conversation-list--pane">
+              {userConversations.length === 0 ? (
+                <p className="sidebar-empty">No conversations yet. Upload a document to begin.</p>
+              ) : (
+                userConversations.map(renderConversationItem)
+              )}
+            </nav>
+          </div>
 
-
-        <nav className="conversation-list">
-          {fileConversations.length === 0 ? (
-            <p className="sidebar-empty">No conversations yet. Upload a document to begin.</p>
-          ) : (
-            fileConversations.map(renderConversationItem)
-          )}
-        </nav>
+          <div className="sidebar-shared-pane">
+            <div className="sidebar-section-label">Shared Conversations</div>
+            <nav className="shared-conversation-list">
+              {sharedConversations.length > 0 ? (
+                sharedConversations.map(renderConversationItem)
+              ) : (
+                <p className="sidebar-empty sidebar-empty--compact">No shared conversations yet.</p>
+              )}
+            </nav>
+          </div>
+        </div>
 
         <div className="sidebar-footer">
           <Link to="/settings" className="sidebar-link">
@@ -617,16 +644,18 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
             <h1>{activeConversation?.conversation_title ?? "Assistant"}</h1>
             <span>{user?.name || user?.email}</span>
           </div>
-          <div className="chatbot-header-share">
-            <button
-              type="button"
-              className="share-btn"
-              onClick={handleShare}
-              disabled={!selectedConversationId || shareLoading}
-            >
-              {shareLoading ? "Sharing…" : "Share"}
-            </button>
-          </div>
+          {!isActiveSharedConversation ? (
+            <div className="chatbot-header-share">
+              <button
+                type="button"
+                className="share-btn"
+                onClick={handleShare}
+                disabled={!selectedConversationId || shareLoading}
+              >
+                {shareLoading ? "Sharing…" : "Share"}
+              </button>
+            </div>
+          ) : null}
           <div className="chatbot-header-actions">
             {wsStatus === "failed" && (
               <span className="ws-status-badge ws-failed">Connection lost</span>

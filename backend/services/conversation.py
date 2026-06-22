@@ -1,7 +1,8 @@
 from fastapi import HTTPException
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from sqlalchemy import and_
+from sqlalchemy.orm import aliased
 from models.conversation import (
     Conversation,
     ConversationList,
@@ -57,6 +58,14 @@ async def update_conversation_title(title: str, conversation_id: int, user_id: i
     return {"Title": "Updated Successfully"}
 
 async def mark_chat_shared(conversation_list_id: int, user, db: AsyncSession) -> dict:
+    result = await db.execute(
+        select(ConversationList).where(ConversationList.id == conversation_list_id)
+    )
+    conversation = result.scalars().first()
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conversation.conversation_type == "shared global" or conversation.conversation_type == "shared per_file":
+        raise HTTPException(status_code=403, detail="Cannot share imported conversation")
     
     message_count = await db.scalar(
         select(func.count(Conversation.id)).where(Conversation.chat_id == conversation_list_id)
@@ -133,24 +142,44 @@ async def get_merged_messages(
 
 
 async def get_chat_shared(shared_id: int, user, db: AsyncSession) -> dict:
+    ImportedConversation = aliased(ConversationList)
+    SourceConversation = aliased(ConversationList)
+
     result = await db.execute(
-        select(CombinedSharedConversationImport).where(CombinedSharedConversationImport.id == shared_id)
-    )
-
-    shared_record = result.scalars().first()
-   
-    if not shared_record:
-        raise HTTPException(status_code=404, detail="Shared conversation not found")
-
-    existing_import = await db.execute(
-        select(ConversationList).where(
-            ConversationList.shared_conversation_id == shared_id,
-            ConversationList.user_id == user.id,
-            ConversationList.is_active == True,  # noqa: E712
+        select(
+            CombinedSharedConversationImport,
+            ImportedConversation,
+            SourceConversation,
+        )
+        .outerjoin(
+            ImportedConversation,
+            and_(
+                ImportedConversation.shared_conversation_id
+                == CombinedSharedConversationImport.id,
+                ImportedConversation.user_id == user.id,
+                ImportedConversation.is_active == True,  # noqa: E712
+            ),
+        )
+        .join(
+            SourceConversation,
+            SourceConversation.id
+            == CombinedSharedConversationImport.shared_chat_id,
+        )
+        .where(
+            CombinedSharedConversationImport.id == shared_id,
         )
     )
-    imported_list = existing_import.scalars().first()
-   
+
+    row = result.first()
+
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="Shared conversation not found",
+        )
+
+    shared_record, imported_list, source_list = row
+
     if imported_list:
         return {
             "conversation_list": imported_list,
@@ -158,17 +187,22 @@ async def get_chat_shared(shared_id: int, user, db: AsyncSession) -> dict:
             "messages_imported": shared_record.limit,
         }
 
-    source_result = await db.execute(
-        select(ConversationList).where(ConversationList.id == shared_record.shared_chat_id)
-    )
-    source_list = source_result.scalars().first()
     if not source_list:
-        raise HTTPException(status_code=404, detail="Original conversation no longer exists")
+        raise HTTPException(
+            status_code=404,
+            detail="Original conversation no longer exists",
+        )
+
+    type_of_conv = (
+        "shared global"
+        if source_list.conversation_type == "global"
+        else "shared per_file"
+    )
 
     new_conversation_list = ConversationList(
         user_id=user.id,
         conversation_title=source_list.conversation_title,
-        conversation_type="per_file",
+        conversation_type=type_of_conv,
         is_active=True,
         file_id=source_list.file_id,
         shared_conversation_id=shared_id,
@@ -176,8 +210,6 @@ async def get_chat_shared(shared_id: int, user, db: AsyncSession) -> dict:
     db.add(new_conversation_list)
     await db.commit()
     await db.refresh(new_conversation_list)
-
-    await db.commit()
 
     return {
         "conversation_list": new_conversation_list,

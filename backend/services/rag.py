@@ -131,7 +131,7 @@ async def prepare(
         settings.chat_history_max_chars,
     )
     match convo.conversation_type:
-        case "per_file":
+        case "per_file" | "shared per_file":
             file_ids = [convo.file_id] if convo.file_id else None
             # Per-file only: prior context is safe because file_ids locks retrieval to one doc.
             # Global skips this — off-topic prior responses bias the embedding across files.

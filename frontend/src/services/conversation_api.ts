@@ -13,6 +13,7 @@ export type ConversationListItem = {
   is_active: boolean;
   conversation_type: string;
   file_id: number | null;
+  shared_conversation_id: number | null;
 };
 
 export type ChatWsEvent =
