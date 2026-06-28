@@ -75,6 +75,7 @@ function Landing() {
             <span className="lp-nav-brand-name">Chatpaper</span>
           </Link>
           <div className="lp-nav-actions">
+            <Link to="/pricing" className="lp-nav-signin">Pricing</Link>
             <Link to="/login" className="lp-nav-signin">Sign in</Link>
             <Link to="/login?mode=signup" className="lp-nav-cta">Get Started Free</Link>
           </div>
@@ -169,7 +170,7 @@ function Landing() {
         <div className="lp-section-inner">
           <p className="lp-section-label">PRICING</p>
           <h2 className="lp-section-heading">Simple Pricing</h2>
-          <p className="lp-section-sub">No credit card. No hidden fees. Just start.</p>
+          <p className="lp-section-sub">Start free, upgrade when you need more credits.</p>
           <div className="lp-pricing">
             <div className="lp-plan">
               <div className="lp-plan-badge">Free</div>
@@ -185,7 +186,7 @@ function Landing() {
                   </li>
                 ))}
               </ul>
-              <Link to="/login?mode=signup" className="lp-plan-cta">Get Started Free</Link>
+              <Link to="/pricing" className="lp-plan-cta">View All Plans</Link>
             </div>
           </div>
         </div>

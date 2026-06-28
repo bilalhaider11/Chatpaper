@@ -17,6 +17,11 @@ from models.conversation import ConversationList
 from models.file_model import FileRecord
 from models.ingestion import IngestionJob
 from schema.file import UploadResponse
+from services.credits import (
+    InsufficientCreditsError,
+    deduct_credits,
+    get_credits,
+)
 from tasks.ingestion_tasks import cleanup_orphaned_vectors, run_ingestion
 
 logger = logging.getLogger(__name__)
@@ -46,6 +51,10 @@ def _save_and_hash(src_file, dest_path: Path) -> str:
 async def upload_files(file: UploadFile, db: AsyncSession, current_user: User, description: str | None) -> UploadResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
+
+    available = await get_credits(current_user.id, db)
+    if available < settings.CREDIT_COST_FILE_UPLOAD:
+        raise InsufficientCreditsError(settings.CREDIT_COST_FILE_UPLOAD, available)
 
     # Strip any directory components from the client-supplied name to prevent
     # path traversal (e.g. "../../etc/cron.d/evil").
@@ -152,6 +161,7 @@ async def upload_files(file: UploadFile, db: AsyncSession, current_user: User, d
             await db.commit()
             await db.refresh(soft_dup)
             await db.refresh(convo)
+            await deduct_credits(current_user.id, settings.CREDIT_COST_FILE_UPLOAD, db)
             return UploadResponse(
                 id=soft_dup.id,
                 filename=soft_dup.filename,
@@ -214,6 +224,7 @@ async def upload_files(file: UploadFile, db: AsyncSession, current_user: User, d
                 "Active ingestion job %s already exists for file %s; skipping duplicate dispatch.",
                 existing_job.id, db_record.id,
             )
+            await deduct_credits(current_user.id, settings.CREDIT_COST_FILE_UPLOAD, db)
             return UploadResponse(
                 id=db_record.id,
                 filename=db_record.filename,
@@ -230,6 +241,7 @@ async def upload_files(file: UploadFile, db: AsyncSession, current_user: User, d
         except IntegrityError:
             await db.rollback()
             logger.warning("IntegrityError creating IngestionJob for file %s; duplicate guard hit.", db_record.id)
+            await deduct_credits(current_user.id, settings.CREDIT_COST_FILE_UPLOAD, db)
             return UploadResponse(
                 id=db_record.id,
                 filename=db_record.filename,
@@ -242,6 +254,7 @@ async def upload_files(file: UploadFile, db: AsyncSession, current_user: User, d
         job.celery_task_id = result_task.id
         await db.commit()
 
+        await deduct_credits(current_user.id, settings.CREDIT_COST_FILE_UPLOAD, db)
         return UploadResponse(
             id=db_record.id,
             filename=db_record.filename,

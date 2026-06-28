@@ -28,6 +28,7 @@ async def _get_cached_user(user_id: int) -> User | None:
     user.email = data["email"]
     user.name = data.get("name")
     user.role = data["role"]
+    user.credits = data["credits"]
     user.is_active = data["is_active"]
     user.auth_provider = data["auth_provider"]
     from datetime import datetime
@@ -50,6 +51,7 @@ async def _cache_user(user: User) -> None:
         "name": user.name,
         "role": user.role.value if hasattr(user.role, "value") else user.role,
         "is_active": user.is_active,
+        "credits":user.credits,
         "auth_provider": user.auth_provider,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "updated_at": user.updated_at.isoformat() if user.updated_at else None,

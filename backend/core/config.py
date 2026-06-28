@@ -129,6 +129,24 @@ class Settings(BaseModel):
     # Set true when running behind a reverse proxy (nginx, ALB, Caddy) so that
     # X-Forwarded-For is trusted for rate-limiting and IP logging.
     trust_proxy_headers: bool = os.getenv("TRUST_PROXY_HEADERS", "false").lower() == "true"
+    
+        
+    STRIPE_PUBLISHABLE_KEY: str=os.getenv("STRIPE_PUBLISHABLE_KEY","")
+    STRIPE_SECRET_KEY: str=os.getenv("STRIPE_SECRET_KEY","")
+    WEBHOOK_KEY:str=os.getenv("WEBHOOK_KEY","")
+    
+    CREDIT_COST_FILE_UPLOAD: int = 50
+    CREDIT_COST_CHAT:int = 10
+    
+    BASIC_PRODUCT_ID:str=os.getenv("BASIC_PRODUCT_ID","")
+    BASIC_PRICE_ID:str=os.getenv("BASIC_PRICE_ID","")
+    
+    PRO_PRODUCT_ID:str=os.getenv("PRO_PRODUCT_ID","")
+    PRO_PRICE_ID:str=os.getenv("PRO_PRICE_ID","")
+
+    credits_flush_interval_seconds: int = int(
+        os.getenv("CREDITS_FLUSH_INTERVAL_SECONDS", "300")
+    )
 
     # CORS — comma-separated list read from env
     cors_allowed_origins: list[str] = [

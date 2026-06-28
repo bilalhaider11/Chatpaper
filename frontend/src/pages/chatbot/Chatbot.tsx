@@ -149,7 +149,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
       );
     } else if (event.type === "error") {
       setLiveMessages((prev) => prev.filter((m) => !m.streaming));
-      setWsError("Something went wrong — please try again.");
+      setWsError(event.detail);
     }
   }, []);
 
