@@ -39,7 +39,7 @@ PLAN_CONFIG = {
     "basic": {
         "name": "Basic",
         "price_label": "$9",
-        "period": "/ month",
+        "period": "/ week",
         "credits": PLAN_CREDITS["basic"],
         "stripe_price_id": settings.BASIC_PRICE_ID,
         "product_id": settings.BASIC_PRODUCT_ID,
@@ -78,6 +78,10 @@ class SubscriptionResponse(BaseModel):
 class ChangePlanResponse(BaseModel):
     status: str
     plan: str
+    message: str
+
+class CancelSubscriptionResponse(BaseModel):
+    status: str
     message: str
 
 
@@ -383,6 +387,7 @@ async def change_plan(
             sub_row.subscription_id,
             items=[{"id": item_id, "price": new_price_id}],
             proration_behavior=proration_behavior,
+            cancel_at_period_end=False,
         )
     except stripe.error.StripeError as e:
         raise HTTPException(
@@ -405,6 +410,39 @@ async def change_plan(
     )
 
 
+@router.post("/billing/cancel-subscription", response_model=CancelSubscriptionResponse)
+async def cancel_subscription(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    sub_row = await _get_user_subscription(db, current_user.id)
+
+    if not sub_row or not sub_row.status or not sub_row.subscription_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active paid subscription found",
+        )
+
+    try:
+        stripe_subscription = await run_in_threadpool(
+            stripe.Subscription.modify,
+            sub_row.subscription_id,
+            cancel_at_period_end=True,
+        )
+    except stripe.error.StripeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Stripe error: {e.user_message or str(e)}",
+        )
+
+    return CancelSubscriptionResponse(
+        status="scheduled",
+        message=(
+            "Your subscription has been scheduled for cancellation. "
+            "You will continue to have access until the end of your current billing period."
+        ),
+    )
+    
 @router.post("/webhooks/stripe")
 async def stripe_webhook(request: Request):
     payload = await request.body()

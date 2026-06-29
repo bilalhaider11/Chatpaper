@@ -169,12 +169,24 @@ function Home({ onLogout }: HomeProps) {
       )}
 
       <nav className="home-navbar">
-        <img src={logo} alt="Chatpaper" className="home-logo" />
-        <button type="button" className="home-nav-logout" onClick={logout}>
-          <LogoutIcon width={14} height={14} />
-          Logout
-        </button>
-      </nav>
+  <img src={logo} alt="Chatpaper" className="home-logo" />
+
+  <div className="home-nav-actions">
+    <Link to="/pricing" className="home-nav-pricing">
+      
+      Pricing
+    </Link>
+
+    <button
+      type="button"
+      className="home-nav-logout"
+      onClick={logout}
+    >
+      <LogoutIcon width={14} height={14} />
+      Logout
+    </button>
+  </div>
+</nav>
 
       <div className="home-content">
         <div className="home-hero">

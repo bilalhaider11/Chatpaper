@@ -6,11 +6,13 @@ import {
   activateFreePlan,
   changePlan,
   createCheckoutSession,
+  cancelSubcription,
   fetchCredits,
   fetchPlans,
   fetchSubscription,
   type Plan,
 } from "../../services/billing_api";
+import CancelSubscriptionModal from "./CancelSubscriptionModal";
 import "../landing/Landing.css";
 import "./Pricing.css";
 
@@ -22,10 +24,8 @@ const PLAN_FEATURES: Record<string, string[]> = {
     "AI-powered citations",
   ],
   basic: [
-    "200 credits / month",
+    "200 credits / week",
     "Everything in Free",
-    "Priority document processing",
-    "Email support",
   ],
   pro: [
     "400 credits / month",
@@ -48,6 +48,19 @@ export default function Pricing() {
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [cancelScheduled, setCancelScheduled] = useState(false);
+  const [cancelingSubscription, setCancelingSubscription] = useState(false);
+  const [cancelModal, setCancelModal] = useState<{
+    open: boolean;
+    mode: "confirm" | "success" | "error";
+    title: string;
+    message: string;
+  }>({
+    open: false,
+    mode: "confirm",
+    title: "",
+    message: "",
+  });
 
   const loadUserBilling = () => {
     if (!isLoggedIn) return;
@@ -57,7 +70,7 @@ export default function Pricing() {
         setCurrentPlan(creditsData.plan);
         setSubscriptionActive(creditsData.subscription_active);
         setCanUseFree(subData.can_use_free);
-      })
+              })
       .catch(() => {});
   };
 
@@ -119,6 +132,7 @@ export default function Pricing() {
     try {
       if (hasPaidSubscription && (planId === "basic" || planId === "pro")) {
         const result = await changePlan(planId);
+        setCancelScheduled(false);
         setNotice(result.message);
         loadUserBilling();
         window.setTimeout(loadUserBilling, 2500);
@@ -135,6 +149,44 @@ export default function Pricing() {
           : "Unable to start checkout. Please try again."
       );
       setLoadingPlan(null);
+    }
+  };
+
+  const openCancelConfirmModal = () => {
+    setCancelModal({
+      open: true,
+      mode: "confirm",
+      title: "Cancel subscription?",
+      message:
+        "Your plan will remain active until the end of the current billing period. After that, you will lose access to paid plan benefits.",
+    });
+  };
+
+  const closeCancelModal = () => {
+    if (cancelingSubscription) return;
+    setCancelModal((prev) => ({ ...prev, open: false }));
+  };
+
+  const handleConfirmCancelSubscription = async () => {
+    setCancelingSubscription(true);
+    try {
+      const response = await cancelSubcription();
+      setCancelScheduled(true);
+      setCancelModal({
+        open: true,
+        mode: "success",
+        title: "Cancellation scheduled",
+        message: response.message,
+      });
+    } catch {
+      setCancelModal({
+        open: true,
+        mode: "error",
+        title: "Unable to cancel",
+        message: "We couldn't cancel your subscription. Please try again or contact support.",
+      });
+    } finally {
+      setCancelingSubscription(false);
     }
   };
 
@@ -170,13 +222,16 @@ export default function Pricing() {
     return false;
   };
 
+  const isCancelButtonDisabled =
+    !hasPaidSubscription || cancelScheduled || cancelingSubscription;
+
   const orderedPlans = plans.length
     ? plans
     : [
-        { id: "free", name: "Free", price_label: "$0", period: "/ forever", credits: 100 },
-        { id: "basic", name: "Basic", price_label: "$9", period: "/ month", credits: 200 },
-        { id: "pro", name: "Pro", price_label: "$18", period: "/ month", credits: 400 },
-      ];
+      { id: "free", name: "Free", price_label: "$0", period: "/ forever", credits: 100 },
+      { id: "basic", name: "Basic", price_label: "$9", period: "/ week", credits: 200 },
+      { id: "pro", name: "Pro", price_label: "$18", period: "/ month", credits: 400 },
+    ];
 
   return (
     <div className="lp-root pricing-page">
@@ -264,6 +319,35 @@ export default function Pricing() {
               );
             })}
           </div>
+
+          {hasPaidSubscription && (
+            <div className="cancel-button">
+              <button
+                type="button"
+                className="cancelSubscriptionButton lp-plan-cta"
+                onClick={openCancelConfirmModal}
+                disabled={isCancelButtonDisabled}
+              >
+                {cancelScheduled ? "Cancellation scheduled" : "Cancel subscribed plan"}
+              </button>
+              {cancelScheduled && (
+                <p className="pricing-cancel-note">
+                  Your subscription will end at the close of this billing period. Upgrade or
+                  downgrade to keep your plan active.
+                </p>
+              )}
+            </div>
+          )}
+
+          <CancelSubscriptionModal
+            open={cancelModal.open}
+            mode={cancelModal.mode}
+            title={cancelModal.title}
+            message={cancelModal.message}
+            loading={cancelingSubscription}
+            onClose={closeCancelModal}
+            onConfirm={() => void handleConfirmCancelSubscription()}
+          />
 
           <p className="pricing-footnote">
             File uploads cost 50 credits · Each chat message costs 10 credits

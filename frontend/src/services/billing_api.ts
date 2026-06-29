@@ -56,6 +56,11 @@ export type ChangePlanResponse = {
   message: string;
 };
 
+export type CancelSubscription = {
+  status: string;
+  message:string;
+}
+
 export async function createCheckoutSession(plan: "basic" | "pro") {
   const response = await api.post<CheckoutResponse>(
     "/billing/create-checkout-session",
@@ -68,6 +73,14 @@ export async function changePlan(plan: "basic" | "pro") {
   const response = await api.post<ChangePlanResponse>(
     "/billing/change-plan",
     { plan }
+  );
+  return response.data;
+}
+
+export async function cancelSubcription(){
+  const response = await api.post<CancelSubscription>(
+    "/billing/cancel-subscription",
+
   );
   return response.data;
 }
