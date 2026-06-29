@@ -15,7 +15,6 @@ from fastapi.templating import Jinja2Templates
 templates = Jinja2Templates(directory="core")
 
 from core.email_config import configure_email_credentials
-from services.credits import init_user_credits
 
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
     result = await db.execute(
@@ -42,7 +41,6 @@ async def create_new_user(db: AsyncSession, user: schema_auth.UserCreate) -> Use
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
-    await init_user_credits(new_user.id, db)
     return new_user
 
 
@@ -51,7 +49,6 @@ async def create_google_user(db: AsyncSession, email: str, name: str | None = No
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
-    await init_user_credits(new_user.id, db)
     return new_user
 
 

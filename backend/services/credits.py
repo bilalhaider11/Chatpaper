@@ -136,15 +136,3 @@ async def adjust_credits_for_plan_change(
     delta = new_cap - old_cap
     new_balance = max(0, current + delta)
     return await set_credits(user_id, new_balance, db)
-
-
-async def init_user_credits(user_id: int, db: AsyncSession) -> None:
-    await db.execute(
-        update(User).where(User.id == user_id).values(credits=0)
-    )
-    await db.commit()
-    redis = get_redis()
-    if redis is not None:
-        await redis.set(_credits_key(user_id), 0)
-
-    
