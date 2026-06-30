@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import logo from "../../assets/logo.png";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
 import { FileRecord, getFiles } from "../../services/files_api";
 import FileUpload from "../../components/fileUpload/FileUpload";
-import { LogoutIcon } from "../../components/icons/Icons";
-import { useLogout } from "../../hooks/useLogout";
+import { Navbar } from "../../components/Navbar";
 import "./Home.css";
 
 type HomeProps = {
@@ -84,7 +82,6 @@ function FilesPanel() {
 
 function Home({ onLogout }: HomeProps) {
   const navigate = useNavigate();
-  const logout = useLogout(onLogout);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [panel, setPanel] = useState<Panel>({ kind: "loading" });
@@ -168,25 +165,7 @@ function Home({ onLogout }: HomeProps) {
         />
       )}
 
-      <nav className="home-navbar">
-  <img src={logo} alt="Chatpaper" className="home-logo" />
-
-  <div className="home-nav-actions">
-    <Link to="/pricing" className="home-nav-pricing">
-      
-      Pricing
-    </Link>
-
-    <button
-      type="button"
-      className="home-nav-logout"
-      onClick={logout}
-    >
-      <LogoutIcon width={14} height={14} />
-      Logout
-    </button>
-  </div>
-</nav>
+      <Navbar variant="dashboard" onLogout={onLogout} />
 
       <div className="home-content">
         <div className="home-hero">

@@ -1,13 +1,12 @@
 import "./Chatbot.css";
-import logo from "../../assets/logo.png";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { fetchCurrentUser, tokenStore, User } from "../../api/axios";
 import FileUpload from "../../components/fileUpload/FileUpload";
 import { DeleteIcon, EditIcon, ErrorIcon } from "../../components/icons/ActionIcons";
-import { FileIcon, GlobeIcon, LogoutIcon, SettingsIcon } from "../../components/icons/Icons";
+import { FileIcon, GlobeIcon } from "../../components/icons/Icons";
+import { Navbar } from "../../components/Navbar";
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
-import { useLogout } from "../../hooks/useLogout";
 import { FileRecord, getFiles } from "../../services/files_api";
 import {
   ChatWsEvent,
@@ -32,7 +31,6 @@ function isImportedConversation(c: ConversationListItem) {
 function Chatbot({ onLogout }: { onLogout: () => void }) {
   const { conversationId: urlId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
-  const logout = useLogout(onLogout);
   const location = useLocation();
   const openUploadOnLoad = (location.state as { openUpload?: boolean } | null)?.openUpload === true;
 
@@ -515,6 +513,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
           className="edit-form"
         >
           <input
+            placeholder=""
             type="text"
             value={editTitle}
             onChange={(e) => setEditTitle(e.target.value)}
@@ -574,13 +573,10 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="chatbot-page">
-      <aside className="chatbot-sidebar">
-        <div className="sidebar-header">
-          <Link to="/dashboard" className="sidebar-brand">
-            <img src={logo} alt="" className="sidebar-icon" />
-            <span className="sidebar-brand-name">Chatpaper</span>
-          </Link>
-
+      <Navbar
+        variant="chat"
+        onLogout={onLogout}
+        sidebarHeader={
           <div className="sidebar-actions">
             <button
               type="button"
@@ -600,43 +596,30 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
               Global Chat
             </button>
           </div>
+        }
+      >
+        <div className="sidebar-user-pane">
+          <div className="sidebar-section-label">Conversations</div>
+          <nav className="conversation-list conversation-list--pane">
+            {userConversations.length === 0 ? (
+              <p className="sidebar-empty">No conversations yet. Upload a document to begin.</p>
+            ) : (
+              userConversations.map(renderConversationItem)
+            )}
+          </nav>
         </div>
 
-        <div className="sidebar-body">
-          <div className="sidebar-user-pane">
-            <div className="sidebar-section-label">Conversations</div>
-            <nav className="conversation-list conversation-list--pane">
-              {userConversations.length === 0 ? (
-                <p className="sidebar-empty">No conversations yet. Upload a document to begin.</p>
-              ) : (
-                userConversations.map(renderConversationItem)
-              )}
-            </nav>
-          </div>
-
-          <div className="sidebar-shared-pane">
-            <div className="sidebar-section-label">Shared Conversations</div>
-            <nav className="shared-conversation-list">
-              {sharedConversations.length > 0 ? (
-                sharedConversations.map(renderConversationItem)
-              ) : (
-                <p className="sidebar-empty sidebar-empty--compact">No shared conversations yet.</p>
-              )}
-            </nav>
-          </div>
+        <div className="sidebar-shared-pane">
+          <div className="sidebar-section-label">Shared Conversations</div>
+          <nav className="shared-conversation-list">
+            {sharedConversations.length > 0 ? (
+              sharedConversations.map(renderConversationItem)
+            ) : (
+              <p className="sidebar-empty sidebar-empty--compact">No shared conversations yet.</p>
+            )}
+          </nav>
         </div>
-
-        <div className="sidebar-footer">
-          <Link to="/settings" className="sidebar-link">
-            <SettingsIcon width={15} height={15} />
-            Settings
-          </Link>
-          <button type="button" className="sidebar-logout" onClick={logout}>
-            <LogoutIcon width={15} height={15} />
-            Logout
-          </button>
-        </div>
-      </aside>
+      </Navbar>
 
       <main className="chatbot-main">
         <header className="chatbot-header">

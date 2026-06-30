@@ -20,6 +20,7 @@ from services.credits import (
     adjust_credits_for_plan_change,
     apply_plan_credits,
     get_credits,
+    update_cancel_subscription
 )
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ class SubscriptionResponse(BaseModel):
     plan: str | None = None
     status: bool | None = None
     can_use_free: bool
+    cancel_subscription:bool
 
 
 class ChangePlanResponse(BaseModel):
@@ -83,6 +85,7 @@ class ChangePlanResponse(BaseModel):
 class CancelSubscriptionResponse(BaseModel):
     status: str
     message: str
+    cancel_subscription:bool
 
 
 async def _get_user_subscription(
@@ -269,6 +272,7 @@ async def get_user_subscription(
         plan=sub.plan,
         status=sub.status,
         can_use_free=False,
+        cancel_subscription=sub.cancel_subscription,
     )
 
 
@@ -394,6 +398,7 @@ async def change_plan(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Stripe error: {e.user_message or str(e)}",
         )
+    await update_cancel_subscription(False,current_user,db)
 
     action = "upgraded" if is_upgrade else "downgraded"
     return ChangePlanResponse(
@@ -435,12 +440,14 @@ async def cancel_subscription(
             detail=f"Stripe error: {e.user_message or str(e)}",
         )
 
+    await update_cancel_subscription(True,current_user,db)
     return CancelSubscriptionResponse(
         status="scheduled",
         message=(
             "Your subscription has been scheduled for cancellation. "
             "You will continue to have access until the end of your current billing period."
         ),
+        cancel_subscription=True,
     )
     
 @router.post("/webhooks/stripe")

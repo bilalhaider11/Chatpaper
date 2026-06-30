@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useDropzone } from "react-dropzone";
-import logo from "../../assets/logo.png";
 import { tokenStore } from "../../api/axios";
 import FileUpload from "../../components/fileUpload/FileUpload";
+import { Navbar } from "../../components/Navbar";
 import { deleteFile, downloadFile, FileRecord, getFiles } from "../../services/files_api";
 import { getConversationList } from "../../services/conversation_api";
 import { ACCEPTED_FILE_TYPES } from "../../services/file_config";
-import { ChatBubbleIcon, CheckCircleIcon, DownloadIcon, FileIcon, LogoutIcon, SearchIcon, TrashIcon, UploadIcon } from "../../components/icons/Icons";
-import { useLogout } from "../../hooks/useLogout";
+import { ChatBubbleIcon, CheckCircleIcon, DownloadIcon, FileIcon, SearchIcon, TrashIcon, UploadIcon } from "../../components/icons/Icons";
 import "./Files.css";
 
 function fileIcon(filename: string) {
@@ -45,7 +44,6 @@ function formatSize(bytes: number): string {
 
 function Files({ onLogout }: { onLogout: () => void }) {
   const navigate = useNavigate();
-  const logout = useLogout(onLogout);
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showUpload, setShowUpload] = useState(false);
@@ -171,20 +169,7 @@ function Files({ onLogout }: { onLogout: () => void }) {
         </div>
       )}
 
-      {/* ── Navbar ── */}
-      <nav className="files-navbar">
-        <Link to="/dashboard" className="files-nav-brand">
-          <img src={logo} alt="" className="files-nav-icon" />
-          <span className="files-nav-brand-name">Chatpaper</span>
-        </Link>
-        <div className="files-nav-right">
-          <Link to="/chat" className="files-nav-link">Chat</Link>
-          <button type="button" className="files-nav-logout" onClick={logout}>
-            <LogoutIcon width={14} height={14} />
-            Logout
-          </button>
-        </div>
-      </nav>
+      <Navbar variant="files" onLogout={onLogout} />
 
       {/* ── Main content ── */}
       <div className="files-content">

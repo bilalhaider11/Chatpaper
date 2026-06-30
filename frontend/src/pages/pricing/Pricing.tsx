@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import logo from "../../assets/logo.png";
+import { Navbar } from "../../components/Navbar";
 import { tokenStore } from "../../api/axios";
 import {
   activateFreePlan,
@@ -43,6 +43,7 @@ export default function Pricing() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [currentPlan, setCurrentPlan] = useState<string | null>(null);
   const [subscriptionActive, setSubscriptionActive] = useState<boolean | null>(null);
+  const [disableButton,setDisableButton] = useState(false);
   const [canUseFree, setCanUseFree] = useState(true);
   const [credits, setCredits] = useState<number | null>(null);
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
@@ -68,6 +69,7 @@ export default function Pricing() {
       .then(([creditsData, subData]) => {
         setCredits(creditsData.credits);
         setCurrentPlan(creditsData.plan);
+        setDisableButton(subData.cancel_subscription);
         setSubscriptionActive(creditsData.subscription_active);
         setCanUseFree(subData.can_use_free);
               })
@@ -172,6 +174,7 @@ export default function Pricing() {
     try {
       const response = await cancelSubcription();
       setCancelScheduled(true);
+      setDisableButton(response.cancel_subscription);
       setCancelModal({
         open: true,
         mode: "success",
@@ -223,7 +226,9 @@ export default function Pricing() {
   };
 
   const isCancelButtonDisabled =
-    !hasPaidSubscription || cancelScheduled || cancelingSubscription;
+  
+    !hasPaidSubscription || cancelScheduled || cancelingSubscription || disableButton;
+
 
   const orderedPlans = plans.length
     ? plans
@@ -235,30 +240,7 @@ export default function Pricing() {
 
   return (
     <div className="lp-root pricing-page">
-      <nav className="lp-nav">
-        <div className="lp-nav-inner">
-          <Link to="/" className="lp-nav-brand">
-            <img src={logo} alt="Chatpaper" className="lp-nav-logo" />
-            <span className="lp-nav-brand-name">Chatpaper</span>
-          </Link>
-          <div className="lp-nav-actions">
-            {isLoggedIn ? (
-              <Link to="/dashboard" className="lp-nav-cta">
-                Dashboard
-              </Link>
-            ) : (
-              <>
-                <Link to="/login" className="lp-nav-signin">
-                  Sign in
-                </Link>
-                <Link to="/login?mode=signup" className="lp-nav-cta">
-                  Get Started
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
-      </nav>
+      <Navbar variant="pricing" />
 
       <section className="lp-section lp-pricing-section pricing-hero">
         <div className="lp-section-inner">
@@ -348,7 +330,6 @@ export default function Pricing() {
             onClose={closeCancelModal}
             onConfirm={() => void handleConfirmCancelSubscription()}
           />
-
           <p className="pricing-footnote">
             File uploads cost 50 credits · Each chat message costs 10 credits
           </p>

@@ -9,68 +9,7 @@
 
 
 /* ── Sticky navbar ────────────────────────────────── */
-
-.home-navbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 48px;
-    height: 64px;
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-    background: rgba(9, 14, 31, 0.85);
-    backdrop-filter: blur(12px);
-    box-shadow: 0 1px 0 rgba(148, 163, 184, 0.06);
-}
-
-.home-logo {
-    height: 62px;
-    width: auto;
-    object-fit: contain;
-}
-
-.home-nav-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.home-nav-pricing,
-.home-nav-logout {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    border-radius: 8px;
-    background: transparent;
-    color: #94a3b8;
-    font-size: 0.84rem;
-    font-weight: 500;
-    text-decoration: none;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.home-nav-pricing:hover {
-    color: #ffffff;
-    border-color: #6366f1;
-    background: rgba(99, 102, 241, 0.1);
-}
-
-.home-nav-logout:hover {
-    color: #f87171;
-    border-color: rgba(239, 68, 68, 0.3);
-    background: rgba(239, 68, 68, 0.08);
-}
-
-.home-nav-logout:hover {
-    color: #f87171;
-    border-color: rgba(239, 68, 68, 0.3);
-}
-
+/* Navbar styles moved to components/Navbar.css */
 
 /* ── Main content grid ────────────────────────────── */
 
@@ -214,13 +153,13 @@
         padding: 48px 28px;
         gap: 40px;
     }
-    .home-navbar {
+    .navbar--topbar-dashboard {
         padding: 0 28px;
     }
 }
 
 @media (max-width: 640px) {
-    .home-navbar {
+    .navbar--topbar-dashboard {
         padding: 0 20px;
     }
     .home-content {

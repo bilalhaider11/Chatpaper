@@ -1,6 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import logo from "../../assets/logo.png";
 import {
   changePassword,
   fetchAllUsers,
@@ -9,8 +8,7 @@ import {
   updateName,
   User,
 } from "../../api/axios";
-import { ChatBubbleIcon, FileIcon, LogoutIcon, SettingsIcon } from "../../components/icons/Icons";
-import { useLogout } from "../../hooks/useLogout";
+import { Navbar } from "../../components/Navbar";
 import { isValidName, NAME_REQUIREMENTS, normalizeName } from "../../utils/Validations";
 import { isValidPassword, PASSWORD_REQUIREMENTS } from "../../utils/Validations";
 import "./Settings.css";
@@ -21,7 +19,6 @@ type SettingsProps = {
 
 function Settings({ onLogout }: SettingsProps) {
   const navigate = useNavigate();
-  const logout = useLogout(onLogout);
   const [user, setUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
@@ -234,34 +231,7 @@ function Settings({ onLogout }: SettingsProps) {
 
   return (
     <div className="settings-page">
-      <aside className="settings-sidebar">
-        <Link to="/dashboard" className="sidebar-brand">
-          <img src={logo} alt="" className="sidebar-icon" />
-          <span className="sidebar-brand-name">Chatpaper</span>
-        </Link>
-
-        <nav className="settings-nav">
-          <Link to="/chat" className="settings-nav-link">
-            <ChatBubbleIcon width={16} height={16} />
-            Chat
-          </Link>
-          <Link to="/files" className="settings-nav-link">
-            <FileIcon width={16} height={16} />
-            My Files
-          </Link>
-          <Link to="/settings" className="settings-nav-link settings-nav-link-active">
-            <SettingsIcon width={16} height={16} />
-            Settings
-          </Link>
-        </nav>
-
-        <div className="settings-sidebar-footer">
-          <button type="button" className="sidebar-logout" onClick={logout}>
-            <LogoutIcon width={15} height={15} />
-            Logout
-          </button>
-        </div>
-      </aside>
+      <Navbar variant="settings" onLogout={onLogout} />
 
       <main className="settings-main">
         <header className="settings-header">

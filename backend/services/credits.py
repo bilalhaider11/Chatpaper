@@ -88,7 +88,12 @@ async def set_credits(user_id: int, amount: int, db: AsyncSession) -> int:
     await db.commit()
     return amount
 
-
+async def update_cancel_subscription(cancelled:bool, user:User,db:AsyncSession):
+    await db.execute(
+        update(Subscription).where(Subscription.user_id == user.id).values(cancel_subscription=cancelled)
+    )
+    await db.commit()
+    
 async def deduct_credits(user_id: int, amount: int, db: AsyncSession) -> int:
     if amount <= 0:
         return await get_credits(user_id, db)

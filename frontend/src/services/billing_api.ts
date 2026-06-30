@@ -18,6 +18,7 @@ export type SubscriptionInfo = {
   plan: string | null;
   status: boolean | null;
   can_use_free: boolean;
+  cancel_subscription:boolean | null;
 };
 
 export type ActivateFreeResponse = {
@@ -59,6 +60,7 @@ export type ChangePlanResponse = {
 export type CancelSubscription = {
   status: string;
   message:string;
+  cancel_subscription: boolean;
 }
 
 export async function createCheckoutSession(plan: "basic" | "pro") {

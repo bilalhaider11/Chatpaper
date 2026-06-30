@@ -18,6 +18,7 @@ class Subscription(Base):
     current_period_start = Column(DateTime(timezone=False), nullable=True)
     current_period_end = Column(DateTime(timezone=False), nullable=True)
     status = Column(Boolean(), nullable=False, server_default="true")
+    cancel_subscription=Column(Boolean,nullable=False,default=False)
 
 
 class StripeWebhookEvent(Base):
