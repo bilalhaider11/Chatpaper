@@ -1,51 +1,20 @@
-#from __future__ import annotations
-#
-#import functools
-#
-#try:
-#    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-#except ImportError:
-#    ChatOpenAI = None  # type: ignore[assignment,misc]
-#    OpenAIEmbeddings = None  # type: ignore[assignment,misc]
-#
-#from core.config import settings
-#
-#_embedder: "OpenAIEmbeddings | None" = None
-#
-#
-#def get_embedder() -> "OpenAIEmbeddings":
-#    global _embedder
-#    if OpenAIEmbeddings is None:
-#        raise RuntimeError("langchain_openai is not installed")
-#    if _embedder is None:
-#        _embedder = OpenAIEmbeddings(
-#            model=settings.openai_embedding_model,
-#            api_key=settings.openai_api_key,
-#        )
-#    return _embedder
-#
-#
-#@functools.lru_cache(maxsize=8)
-#def get_chat_llm(temperature: float = 0.2) -> "ChatOpenAI":
-#    if ChatOpenAI is None:
-#        raise RuntimeError("langchain_openai is not installed")
-#    return ChatOpenAI(
-#        model=settings.openai_chat_model,
-#        temperature=temperature,
-#        api_key=settings.openai_api_key,
-#    )
-#
-
-
-
-
 from __future__ import annotations
 
 import asyncio
 import functools
 import os
-from core.config import settings
+
+from dotenv import load_dotenv
 import requests
+from sentence_transformers import SentenceTransformer
+from pydantic import BaseModel, model_validator
+
+from core.config import settings
+
+load_dotenv()
+
+select_model = os.getenv("SELECT_MODEL", "HF")
+
 
 HF_API_KEY = settings.HF_API_KEY
 # Legacy api-inference.huggingface.co is retired; use the router chat API.
@@ -54,19 +23,18 @@ HF_ROUTER_CHAT_URL = settings.HF_ROUTER_CHAT_URL
 HF_EMBEDDING_MODEL = settings.HF_EMBEDDING_MODEL
 EMBEDDING_DIMENSION = settings.EMBEDDING_DIMENSION
 
+try:
+    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+except ImportError:
+    ChatOpenAI = None  # type: ignore[assignment,misc]
+    OpenAIEmbeddings = None  # type: ignore[assignment,misc]
 
-def get_embedding_model_name() -> str:
-    return HF_EMBEDDING_MODEL
+from core.config import settings
 
-
-def get_embedding_dimension() -> int:
-    return EMBEDDING_DIMENSION
-
+_embedder: "OpenAIEmbeddings | HFEmbedder" = None
 
 if HF_API_KEY:
     os.environ.setdefault("HF_TOKEN", HF_API_KEY)
-
-from sentence_transformers import SentenceTransformer
 
 
 class _LLMResult:
@@ -146,8 +114,6 @@ class HuggingFaceChatLLM:
             yield _LLMChunk(text[i : i + chunk_size])
 
 
-_embedder = None
-
 
 class HFEmbedder:
     def __init__(self):
@@ -167,12 +133,39 @@ class HFEmbedder:
 
 
 @functools.lru_cache(maxsize=8)
-def get_chat_llm(temperature: float = 0.2) -> HuggingFaceChatLLM:
-    return HuggingFaceChatLLM(temperature=temperature)
+def get_chat_llm(temperature: float = 0.2) -> "HuggingFaceChatLLM | ChatOpenAI":
+    if select_model == "HF":
+        return HuggingFaceChatLLM(temperature=temperature)
+    else:
+        if ChatOpenAI is None:
+            raise RuntimeError("langchain_openai is not installed")
+        return ChatOpenAI(
+            model=settings.openai_chat_model,
+            temperature=temperature,
+            api_key=settings.openai_api_key,
+        )
+
+def get_embedding_model_name() -> str:
+    if select_model == "HF":
+        return HF_EMBEDDING_MODEL
+    return settings.openai_embedding_model
 
 
-def get_embedder() -> HFEmbedder:
+def get_embedder() -> "HFEmbedder | OpenAIEmbeddings":
     global _embedder
-    if _embedder is None:
-        _embedder = HFEmbedder()
+    
+    if select_model == "HF":
+        if HF_EMBEDDING_MODEL:
+            _embedder = HFEmbedder()
+        else:
+            raise RuntimeError("HF embedding model is not configured")
+    else:
+        if OpenAIEmbeddings is None:
+            raise RuntimeError("langchain_openai is not installed")
+        if _embedder is None:
+            _embedder = OpenAIEmbeddings(
+                model=settings.openai_embedding_model,
+                api_key=settings.openai_api_key,
+            )
+            
     return _embedder

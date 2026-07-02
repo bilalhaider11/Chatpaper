@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 import json
 import logging
 
@@ -30,12 +31,23 @@ _consumer_task: asyncio.Task | None = None
 _flush_task: asyncio.Task | None = None
 
 
-def bulk_insert_messages(db: Session, messages: list[QueuedChatMessage]) -> list[Conversation]:
+def _parse_created_at(value: datetime | str | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return None
+
+
+def bulk_insert_messages(db: Session, messages: list[QueuedChatMessage]) -> list[Conversation]:  
     rows = [
         Conversation(
             chat_id=msg.chat_id,
             user_type=msg.user_type,
             statement=msg.statement,
+            created_at=_parse_created_at(msg.created_at),
         )
         for msg in messages
     ]
@@ -67,7 +79,7 @@ async def flush_buffer_to_db() -> int:
 
 async def _periodic_flush() -> None:
     while True:
-        await asyncio.sleep(settings.chat_flush_interval_seconds)
+        await asyncio.sleep(50)
         try:
             if await flush_queue_size() > 0:
                 await flush_buffer_to_db()
@@ -76,8 +88,6 @@ async def _periodic_flush() -> None:
 
 
 async def _on_queue_message(message: AbstractIncomingMessage) -> None:
-    # Messages are already enqueued to Redis by publish_chat_message before
-    # RabbitMQ publish; just ack to keep the queue drained.
     async with message.process():
         pass
 
@@ -87,6 +97,7 @@ async def publish_chat_message(
     user_type: str,
     statement: str,
     temp_id: str | None = None,
+    created_at: datetime | None = None,
 ) -> None:
     if user_type not in ALLOWED_USER_TYPES:
         raise ValueError(f"user_type must be one of {ALLOWED_USER_TYPES}")
@@ -96,6 +107,7 @@ async def publish_chat_message(
         user_type=user_type,
         statement=statement,
         temp_id=temp_id,
+        created_at=created_at or datetime.now(timezone.utc),
     )
 
     await enqueue_message(queued)
@@ -117,6 +129,25 @@ async def publish_chat_message(
         routing_key=QUEUE_NAME,
     )
 
+
+async def handle_conversation_message(
+    chat_id: int,
+    user_type: str,
+    statement: str,
+    *,
+    temp_id: str | None = None,
+    created_at: datetime | None = None,
+    update_cache: bool = True,
+) -> None:
+    """Enqueue a conversation message for bulk DB insert and update Redis cache."""
+    ts = created_at or datetime.now(timezone.utc)
+    await publish_chat_message(
+        chat_id=chat_id,
+        user_type=user_type,
+        statement=statement,
+        temp_id=temp_id,
+        created_at=ts,
+    )
 
 async def start_messaging() -> None:
     global _connection, _channel, _consumer_task, _flush_task

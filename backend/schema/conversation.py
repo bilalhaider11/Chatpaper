@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -43,7 +44,16 @@ class ConversationResponse(BaseModel):
     id: int | None = None
     chat_id: int | None = None
     statement: str
+    created_at: datetime | None = None
     user_type: str
+
+
+class PaginatedConversationResponse(BaseModel):
+    messages: list[ConversationResponse]
+    total: int
+    page: int
+    limit: int
+    has_more: bool
 
 
 class ChatWsSendPayload(BaseModel):

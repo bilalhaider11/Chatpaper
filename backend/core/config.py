@@ -16,7 +16,12 @@ class Settings(BaseModel):
     database: str = os.getenv("DATABASE", "")
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
     
-    chat_data_ttl_seconds:int = int(os.getenv("CHAT_DATA_TTL_SECONDS",'3600'))
+    chat_data_ttl_seconds:int = int(os.getenv("CHAT_DATA_TTL_SECONDS",'300'))
+    chat_conversation_cache_ttl_seconds: int = int(
+        os.getenv("CHAT_CONVERSATION_CACHE_TTL_SECONDS", "200")
+    )
+    
+    chat_conversation_page_size: int = int(os.getenv("CHAT_CONVERSATION_PAGE_SIZE", "10"))
     #email token for forgot password TTL
     email_token_ttl_in_seconds:int = int(os.getenv("EMAIL_TOKEN_TTL_IN_SECONDS",600))
     mail_username:str=os.getenv("MAIL_USERNAME")
@@ -40,7 +45,8 @@ class Settings(BaseModel):
     frontend_url: Optional[str] = os.getenv("FRONTEND_URL")
 
     rabbitmq_url: str = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost/")
-    chat_flush_interval_seconds: int = int(os.getenv("CHAT_FLUSH_INTERVAL_SECONDS", "3600"))
+    chat_flush_interval_seconds: int = int(os.getenv("CHAT_FLUSH_INTERVAL_SECONDS", 180))
+    chat_flush_batch_size: int = int(os.getenv("CHAT_FLUSH_BATCH_SIZE", "20"))
     chat_stream_chunk_size: int = int(os.getenv("CHAT_STREAM_CHUNK_SIZE", "12"))
     chat_stream_ttl_seconds: int = int(os.getenv("CHAT_STREAM_TTL_SECONDS", "300"))
 
@@ -118,7 +124,7 @@ class Settings(BaseModel):
     chat_history_max_chars: int = int(os.getenv("CHAT_HISTORY_MAX_CHARS", "8000"))
 
     # per-user storage quota; 0 = unlimited
-    max_user_storage_mb: int = int(os.getenv("MAX_USER_STORAGE_MB", "0"))
+    max_user_storage_mb: int = int(os.getenv("MAX_USER_STORAGE_MB", "10"))
 
     # ingestion job watchdog — jobs stuck longer than this are marked FAILED_PERMANENT
     ingestion_job_timeout_minutes: int = int(os.getenv("INGESTION_JOB_TIMEOUT_MINUTES", "30"))
