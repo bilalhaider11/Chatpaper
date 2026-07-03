@@ -61,6 +61,13 @@ async def mark_chat_shared(conversation_list_id: int, user, db: AsyncSession) ->
     result = await db.execute(
         select(ConversationList).where(ConversationList.id == conversation_list_id)
     )
+    
+    file_ids = await db.execute(
+        select(ConversationList.file_id).where(ConversationList.user_id == user.id)
+    )
+    
+    unique_file_ids = list(set(fid for fid in file_ids.scalars().all() if fid is not None))
+    
     conversation = result.scalars().first()
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -74,7 +81,8 @@ async def mark_chat_shared(conversation_list_id: int, user, db: AsyncSession) ->
     combined_shared_conversation = CombinedSharedConversationImport(
         limit=message_count or 0,
         shared_user_id=user.id,
-        shared_chat_id=conversation_list_id
+        shared_chat_id=conversation_list_id,
+        file_ids = unique_file_ids if conversation.conversation_type == "global" else {},
     )
     db.add(combined_shared_conversation)
     await db.commit()
@@ -103,16 +111,14 @@ async def get_merged_messages(
     )
 
     row = result.first()
-
-    if not row:
+    if row is None:
         return []
 
-    convo_list, shared = row
+    _, shared_import = row
 
     chat_ids = [chat_list_id]
-
-    if shared:
-        chat_ids.append(shared.shared_chat_id)
+    if shared_import:
+        chat_ids.append(shared_import.shared_chat_id)
 
     result = await db.execute(
         select(Conversation)
@@ -120,23 +126,23 @@ async def get_merged_messages(
         .order_by(Conversation.created_at.asc())
     )
 
-    conversations = list(result.scalars().all())
+    conversations = result.scalars().all()
 
-    if not shared:
-        return conversations
+    if not shared_import:
+        return list(conversations)
 
-    shared_messages = [
-        c for c in conversations
-        if c.chat_id == shared.shared_chat_id
-    ][: shared.limit]
+    shared_messages = []
+    own_messages = []
 
-    own_messages = [
-        c for c in conversations
-        if c.chat_id == chat_list_id
-    ]
+    for conversation in conversations:
+        if conversation.chat_id == shared_import.shared_chat_id:
+            if len(shared_messages) < shared_import.limit:
+                shared_messages.append(conversation)
+        else:
+            own_messages.append(conversation)
 
     merged = shared_messages + own_messages
-    merged.sort(key=lambda x: x.created_at)
+    merged.sort(key=lambda c: c.created_at)
 
     return merged
 

@@ -5,7 +5,6 @@ import chromadb
 from chromadb import Collection
 
 from core.config import settings
-from core.llm import get_embedding_dimension
 
 logger = logging.getLogger(__name__)
 
@@ -34,66 +33,14 @@ def _reset_all() -> None:
     _propositions_col = None
 
 
-def _collection_embedding_dimension(col: Collection) -> int | None:
-    meta_dim = (col.metadata or {}).get("embedding_dimension")
-    if meta_dim is not None:
-        return int(meta_dim)
-    if col.count() == 0:
-        return None
-    peek = col.peek(limit=1, include=["embeddings"])
-    embeddings = peek.get("embeddings") or []
-    if embeddings and embeddings[0] is not None:
-        return len(embeddings[0])
-    return None
-
-
-def _collection_needs_recreate(col: Collection, expected_dim: int) -> bool:
-    stored_dim = (col.metadata or {}).get("embedding_dimension")
-    if stored_dim is not None and int(stored_dim) != expected_dim:
-        return True
-
-    actual_dim = _collection_embedding_dimension(col)
-    if actual_dim is not None and actual_dim != expected_dim:
-        return True
-
-    # Legacy collections created before we tagged embedding_dimension.
-    if stored_dim is None and col.count() > 0:
-        return True
-
-    return False
-
-
-def _ensure_collection(name: str, base_metadata: dict) -> Collection:
-    """Get or create a collection, recreating it when the embedding dimension changed."""
-    expected_dim = get_embedding_dimension()
-    metadata = {**base_metadata, "embedding_dimension": expected_dim}
-    client = get_chroma_client()
-
-    try:
-        col = client.get_collection(name)
-        if _collection_needs_recreate(col, expected_dim):
-            logger.warning(
-                "Recreating Chroma collection %s for embedding dimension %s (was %s)",
-                name,
-                expected_dim,
-                _collection_embedding_dimension(col),
-            )
-            client.delete_collection(name)
-            return client.create_collection(name=name, metadata=metadata)
-        return col
-    except Exception:
-        logger.info("Creating Chroma collection %s (dim=%s)", name, expected_dim)
-        return client.create_collection(name=name, metadata=metadata)
-
-
 def _fetch_collection(name: str, metadata: dict) -> Collection:
     """Get or create a collection, retrying once after a connection error."""
     try:
-        return _ensure_collection(name, metadata)#openai
+        return get_chroma_client().get_or_create_collection(name=name, metadata=metadata)
     except Exception:
         logger.warning("ChromaDB error fetching collection %s; resetting and retrying", name)
         _reset_all()
-        return _ensure_collection(name, metadata)#openai
+        return get_chroma_client().get_or_create_collection(name=name, metadata=metadata)
 
 
 def get_child_chunks_collection() -> Collection:

@@ -44,27 +44,11 @@ async def _owner_ids_for_files(file_ids: list[int], db: AsyncSession) -> list[in
 async def all_files_when_shared_global(user_id:int, conversationlist_id:int,db: AsyncSession) ->list[int]:
 
     result = await db.execute(
-        select(ConversationList.file_id)
-        .where(
-            ConversationList.user_id
-            == (
-                select(CombinedSharedConversationImport.shared_user_id)
-                .where(
-                    CombinedSharedConversationImport.id
-                    == (
-                        select(ConversationList.shared_conversation_id)
-                        .where(ConversationList.id == conversationlist_id)
-                        .scalar_subquery()
-                    )
-                )
-                .scalar_subquery()
-            ),
-            ConversationList.file_id.is_not(None),
-            ConversationList.is_active == True,
-        )
+        select(CombinedSharedConversationImport.file_ids)
+        .where(CombinedSharedConversationImport.id == conversationlist_id)
     )
     
-    return list(set(result.scalars().all()))
+    return list(result.scalars().all())
     
 
 async def _global_accessible_file_ids(user_id: int, db: AsyncSession) -> list[int]:
