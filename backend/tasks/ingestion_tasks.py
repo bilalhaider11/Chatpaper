@@ -29,7 +29,7 @@ from core.celery_app import celery_app
 from core.chroma import get_child_chunks_collection, get_document_summaries_collection, get_propositions_collection
 from core.config import settings
 from core.database import SessionLocal
-from core.llm import get_chat_llm, get_embedder
+from core.llm import get_chat_llm, get_embedder, get_embedding_model_name
 import models.auth  # noqa: F401 — registers User so SA can resolve files_data.user_id FK
 import models.conversation  # noqa: F401 — registers ConversationList, Conversation
 from models.file_model import FileRecord
@@ -329,7 +329,7 @@ def _stage_embed_upsert(
             page_start=parent.page_start,
             page_end=parent.page_end,
             element_types=parent.element_types.split(",") if parent.element_types else [],
-            embedding_model=settings.openai_embedding_model,
+            embedding_model=get_embedding_model_name(),
             is_committed=False,
         ))
         db.flush()
@@ -656,7 +656,7 @@ def run_ingestion(self, job_id: int, file_id: int) -> dict[str, Any]:
 
         _complete(job, db, file_hash)
         file_record.ingestion_status = IngestionJob.STATUS_COMPLETE
-        file_record.embedding_model = settings.openai_embedding_model
+        file_record.embedding_model = get_embedding_model_name()
         db.commit()
 
         return {"status": "COMPLETE", "job_id": job_id, "chunks": len(parent_chunks)}

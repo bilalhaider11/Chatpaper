@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.chroma import delete_vectors_for_file, get_child_chunks_collection
 from core.config import settings
 from core.database import SessionLocal
-from core.llm import get_embedder
+from core.llm import get_embedder, get_embedding_model_name
 from models.file_model import FileRecord
 from models.ingestion import DocumentParent
 
@@ -93,7 +93,7 @@ def _embed_file(
 
 
 def main(dry_run: bool) -> None:
-    current_model = settings.openai_embedding_model
+    current_model = get_embedding_model_name()
     print(f"Target embedding model: {current_model}")
     if dry_run:
         print("DRY-RUN mode — no changes will be written.\n")

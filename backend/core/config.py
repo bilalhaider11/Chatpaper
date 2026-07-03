@@ -100,6 +100,14 @@ class Settings(BaseModel):
 
     # file upload directory; falls back to project-relative "files/" if not set
     upload_dir: str = os.getenv("UPLOAD_DIR", "")
+    
+    HF_API_KEY:str = os.getenv("HF_API_KEY")
+    # Legacy api-inference.huggingface.co is retired; use the router chat API.
+    HF_CHAT_MODEL:str = os.getenv("HF_CHAT_MODEL")
+    HF_ROUTER_CHAT_URL:str = os.getenv("HF_ROUTER_CHAT_URL")
+    HF_EMBEDDING_MODEL:str = os.getenv("HF_EMBEDDING_MODEL")
+    EMBEDDING_DIMENSION:int = 384
+    
 
     # retrieval quality
     retrieval_min_score: float = float(os.getenv("RETRIEVAL_MIN_SCORE", "0.0"))

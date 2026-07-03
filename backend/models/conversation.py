@@ -1,5 +1,5 @@
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, func
-
+from sqlalchemy.dialects.postgresql import ARRAY
 from core.database import Base
 
 
@@ -24,3 +24,30 @@ class ConversationList(Base):
     is_active = Column("is_Active", Boolean, nullable=False, default=True)
     conversation_type = Column(String(20), nullable=False, default="global")
     file_id = Column(Integer, ForeignKey("files_data.id", ondelete="CASCADE"), nullable=True, index=True)
+    shared_conversation_id = Column(
+        Integer,
+        ForeignKey("combined_shared_conversation_import.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    
+
+class CombinedSharedConversationImport(Base):
+    __tablename__ = "combined_shared_conversation_import"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    shared_chat_id = Column(
+        Integer,
+        ForeignKey("conversationlist.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    file_ids = Column(
+        ARRAY(Integer),
+        nullable=False,
+        server_default="{}",
+    )
+    limit = Column(Integer, nullable=False)
+    shared_user_id = Column(Integer, nullable=False)
+    
+    created_at = Column(DateTime(timezone=False), server_default=func.now())

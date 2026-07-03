@@ -17,6 +17,7 @@ const NO_ERRORS: FieldErrors = { name: "", email: "", password: "", general: "" 
 function Login({ onLoginSuccess }: LoginProps) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const redirectTo = searchParams.get("next") || "/dashboard";
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -36,7 +37,7 @@ function Login({ onLoginSuccess }: LoginProps) {
       .then((data) => {
         tokenStore.setToken(data.access_token);
         onLoginSuccess();
-        navigate("/dashboard", { replace: true });
+        navigate(redirectTo.startsWith("/") ? redirectTo : "/dashboard", { replace: true });
       })
       .catch(() => setErrors({ ...NO_ERRORS, general: "Google sign-in failed. Please try again." }))
       .finally(() => setLoading(false));
@@ -91,7 +92,7 @@ function Login({ onLoginSuccess }: LoginProps) {
       const login_res = await login(email, password);
       tokenStore.setToken(login_res.access_token);
       onLoginSuccess();
-      navigate("/dashboard", { replace: true });
+      navigate(redirectTo.startsWith("/") ? redirectTo : "/dashboard", { replace: true });
     } catch (err: any) {
       const status = err?.response?.status;
       const detail = err?.response?.data?.detail;

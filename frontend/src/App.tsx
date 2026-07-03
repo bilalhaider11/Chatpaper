@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useSearchParams } from "react-router-dom";
 import { useState } from "react";
 import Landing from "./pages/landing/Landing";
 import Home from "./pages/home/Home";
@@ -11,9 +11,16 @@ import Settings from "./pages/settings/Settings";
 import Logout from "./pages/logout/Logout";
 import TermsOfService from "./pages/legal/TermsOfService";
 import PrivacyPolicy from "./pages/legal/PrivacyPolicy";
+import SharedConversation from "./pages/share/SharedConversation";
 import NotFound from "./pages/notfound/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { tokenStore } from "./api/axios";
+
+function AuthenticatedRedirect() {
+  const [searchParams] = useSearchParams();
+  const next = searchParams.get("next");
+  return <Navigate to={next?.startsWith("/") ? next : "/dashboard"} replace />;
+}
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(
@@ -34,7 +41,7 @@ function App() {
         path="/login"
         element={
           hasSession ? (
-            <Navigate to="/dashboard" replace />
+            <AuthenticatedRedirect />
           ) : (
             <Login onLoginSuccess={() => setIsAuthenticated(true)} />
           )
@@ -94,6 +101,14 @@ function App() {
         element={
           <ProtectedRoute isAuthenticated={isAuthenticated}>
             <Settings onLogout={handleLogout} />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/conversation/share/:shareId"
+        element={
+          <ProtectedRoute isAuthenticated={isAuthenticated}>
+            <SharedConversation />
           </ProtectedRoute>
         }
       />

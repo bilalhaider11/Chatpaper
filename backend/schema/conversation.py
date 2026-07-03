@@ -20,6 +20,7 @@ class ConversationListResponse(ConversationListBase):
     is_active: bool
     conversation_type: str
     file_id: int | None = None
+    shared_conversation_id: int | None = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -48,3 +49,14 @@ class ConversationResponse(BaseModel):
 class ChatWsSendPayload(BaseModel):
     action: str = "send"
     statement: str
+
+
+class ShareConversationResponse(BaseModel):
+    share_url: str
+    shared_id: int
+
+
+class ImportSharedConversationResponse(BaseModel):
+    conversation_list: ConversationListResponse
+    already_imported: bool
+    messages_imported: int
