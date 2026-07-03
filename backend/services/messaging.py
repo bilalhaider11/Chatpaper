@@ -16,6 +16,7 @@ from services.chat_cache import (
     drain_flush_queue,
     enqueue_message,
     flush_queue_size,
+    append_messages_to_cache,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,7 +121,9 @@ async def publish_chat_message(
         "user_type": user_type,
         "statement": statement,
         "temp_id": temp_id,
+        "created_at": queued.created_at.isoformat(),
     }
+    await append_messages_to_cache(chat_id, [payload])
     await _channel.default_exchange.publish(
         aio_pika.Message(
             body=json.dumps(payload).encode(),

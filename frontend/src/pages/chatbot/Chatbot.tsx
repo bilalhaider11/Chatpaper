@@ -82,7 +82,6 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
     setLoadingOlder(true);
     try {
       const data = await getConversation(selectedConversationId, nextOlderPage, CONVERSATION_PAGE_SIZE);
-      console.log("data2: ", data)
       setMessages((prev) => [...data.messages, ...prev]);
       setHasMoreOlder(data.has_more);
       setNextOlderPage((page) => page + 1);
@@ -285,7 +284,6 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
           setNextOlderPage(1);
           setLoadingOlder(false);
           const data = await getConversation(parsedId, 0, CONVERSATION_PAGE_SIZE);
-          console.log("data: ", data);
           setMessages(data.messages);
           setHasMoreOlder(data.has_more);
           setLiveMessages([]);
