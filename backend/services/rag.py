@@ -151,6 +151,7 @@ async def prepare(
         user_id=convo.user_id,
         conversation_type=convo.conversation_type,
         conversationlist_id=convo.id,
+        shared_conversation_id=convo.shared_conversation_id,
         db=db,
         file_ids=file_ids,
         top_k=top_k,
