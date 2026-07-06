@@ -1,4 +1,5 @@
 /* ── Page shell ───────────────────────────────────── */
+
 .home-page {
     min-height: 100vh;
     background: linear-gradient(135deg, #020617, #0f172a 55%, #1e293b);
@@ -6,49 +7,12 @@
     flex-direction: column;
 }
 
+
 /* ── Sticky navbar ────────────────────────────────── */
-.home-navbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 48px;
-    height: 64px;
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-    background: rgba(9, 14, 31, 0.85); /* solid fallback */
-    backdrop-filter: blur(12px);
-    box-shadow: 0 1px 0 rgba(148, 163, 184, 0.06);
-}
-
-.home-logo {
-    height: 62px;
-    width: auto;
-    object-fit: contain;
-}
-
-.home-nav-logout {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    border-radius: 8px;
-    padding: 6px 14px;
-    background: transparent;
-    color: #94a3b8;
-    font-size: 0.84rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: color 0.15s, border-color 0.15s;
-}
-
-.home-nav-logout:hover {
-    color: #f87171;
-    border-color: rgba(239, 68, 68, 0.3);
-}
+/* Navbar styles moved to components/Navbar.css */
 
 /* ── Main content grid ────────────────────────────── */
+
 .home-content {
     flex: 1;
     display: grid;
@@ -62,7 +26,9 @@
     box-sizing: border-box;
 }
 
+
 /* ── Hero (left column) ───────────────────────────── */
+
 .home-hero {
     position: relative;
     display: flex;
@@ -167,7 +133,9 @@
     transform: translateY(-1px);
 }
 
+
 /* ── Action panel (right column) ─────────────────── */
+
 .home-panel {
     background: rgba(15, 23, 42, 0.6);
     border: 1px solid rgba(148, 163, 184, 0.15);
@@ -176,32 +144,30 @@
     box-shadow: 0 8px 32px rgba(2, 6, 23, 0.4);
 }
 
+
 /* ── Responsive ───────────────────────────────────── */
+
 @media (max-width: 900px) {
     .home-content {
         grid-template-columns: 1fr;
         padding: 48px 28px;
         gap: 40px;
     }
-
-    .home-navbar {
+    .navbar--topbar-dashboard {
         padding: 0 28px;
     }
 }
 
 @media (max-width: 640px) {
-    .home-navbar {
+    .navbar--topbar-dashboard {
         padding: 0 20px;
     }
-
     .home-content {
         padding: 36px 20px;
     }
-
     .home-ctas {
         flex-direction: column;
     }
-
     .home-cta-primary,
     .home-cta-secondary {
         justify-content: center;
@@ -214,7 +180,9 @@
     font-size: 0.9rem;
 }
 
+
 /* Tracking panel */
+
 .hp-tracking-row {
     display: flex;
     align-items: center;
@@ -268,7 +236,9 @@
     border: 1px solid rgba(37, 99, 235, 0.3);
 }
 
+
 /* Status badges used in tracking */
+
 .hp-badge {
     display: inline-block;
     border-radius: 6px;
@@ -278,13 +248,34 @@
     white-space: nowrap;
 }
 
-.hp-badge-queued    { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
-.hp-badge-processing { background: rgba(37, 99, 235, 0.2);  color: #93c5fd; }
-.hp-badge-complete  { background: rgba(22, 163, 74, 0.2);   color: #86efac; }
-.hp-badge-retrying  { background: rgba(217, 119, 6, 0.2);   color: #fcd34d; }
-.hp-badge-failed    { background: rgba(220, 38, 38, 0.2);   color: #fca5a5; }
+.hp-badge-queued {
+    background: rgba(100, 116, 139, 0.2);
+    color: #94a3b8;
+}
+
+.hp-badge-processing {
+    background: rgba(37, 99, 235, 0.2);
+    color: #93c5fd;
+}
+
+.hp-badge-complete {
+    background: rgba(22, 163, 74, 0.2);
+    color: #86efac;
+}
+
+.hp-badge-retrying {
+    background: rgba(217, 119, 6, 0.2);
+    color: #fcd34d;
+}
+
+.hp-badge-failed {
+    background: rgba(220, 38, 38, 0.2);
+    color: #fca5a5;
+}
+
 
 /* Files panel */
+
 .hp-files-panel,
 .hp-tracking {
     gap: 18px;
@@ -345,41 +336,44 @@
         align-items: flex-start;
     }
 }
+
+
 /* ── Onboarding panel ── */
+
 .hp-onboarding {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
 }
 
 .hp-onboarding-steps {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
 .hp-onboarding-steps li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 0.875rem;
-  color: #94a3b8;
-  line-height: 1.5;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.875rem;
+    color: #94a3b8;
+    line-height: 1.5;
 }
 
 .hp-step-num {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
-  border-radius: 50%;
-  font-size: 0.75rem;
-  font-weight: 700;
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 700;
 }

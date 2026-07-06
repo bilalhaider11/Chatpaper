@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from core.config import settings
 from core.auth import get_current_user
 from core.dependencies import get_db
 from core.limiter import limiter
@@ -10,6 +10,7 @@ from models.auth import UserRole
 from models.conversation import Conversation, ConversationList
 from schema.chat import AskRequest, AskResponse
 from services import rag as rag_service
+from services.credits import deduct_credits
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -38,6 +39,8 @@ async def ask(
     convo = result.scalars().first()
     if convo is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    await deduct_credits(current_user.id, settings.CREDIT_COST_CHAT, db)
 
     answer, citations = await rag_service.run_rag(
         question=body.question,

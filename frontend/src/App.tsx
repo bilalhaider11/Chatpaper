@@ -12,6 +12,7 @@ import Logout from "./pages/logout/Logout";
 import TermsOfService from "./pages/legal/TermsOfService";
 import PrivacyPolicy from "./pages/legal/PrivacyPolicy";
 import SharedConversation from "./pages/share/SharedConversation";
+import Pricing from "./pages/pricing/Pricing";
 import NotFound from "./pages/notfound/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { tokenStore } from "./api/axios";
@@ -115,6 +116,7 @@ function App() {
       {/* Public legal pages */}
       <Route path="/terms" element={<TermsOfService />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
+      <Route path="/pricing" element={<Pricing />} />
 
       {/* Authenticated users hitting unknown routes go to dashboard; everyone else sees 404 */}
       <Route

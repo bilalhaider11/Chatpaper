@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { Navbar } from "../../components/Navbar";
 import logo from "../../assets/logo.png";
 import hero from "../../assets/hero.png";
 import "./Landing.css";
@@ -67,19 +68,7 @@ function Landing() {
   return (
     <div className="lp-root">
 
-      {/* ── Navbar ── */}
-      <nav className="lp-nav">
-        <div className="lp-nav-inner">
-          <Link to="/" className="lp-nav-brand">
-            <img src={logo} alt="Chatpaper logo" className="lp-nav-logo" />
-            <span className="lp-nav-brand-name">Chatpaper</span>
-          </Link>
-          <div className="lp-nav-actions">
-            <Link to="/login" className="lp-nav-signin">Sign in</Link>
-            <Link to="/login?mode=signup" className="lp-nav-cta">Get Started Free</Link>
-          </div>
-        </div>
-      </nav>
+      <Navbar variant="public" />
 
       {/* ── Hero ── */}
       <section className="lp-hero">
@@ -169,7 +158,7 @@ function Landing() {
         <div className="lp-section-inner">
           <p className="lp-section-label">PRICING</p>
           <h2 className="lp-section-heading">Simple Pricing</h2>
-          <p className="lp-section-sub">No credit card. No hidden fees. Just start.</p>
+          <p className="lp-section-sub">Start free, upgrade when you need more credits.</p>
           <div className="lp-pricing">
             <div className="lp-plan">
               <div className="lp-plan-badge">Free</div>
@@ -185,7 +174,7 @@ function Landing() {
                   </li>
                 ))}
               </ul>
-              <Link to="/login?mode=signup" className="lp-plan-cta">Get Started Free</Link>
+              <Link to="/pricing" className="lp-plan-cta">View All Plans</Link>
             </div>
           </div>
         </div>

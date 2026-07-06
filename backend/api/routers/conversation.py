@@ -24,9 +24,11 @@ from schema.conversation import (
     ImportSharedConversationResponse,
     ShareConversationResponse,
 )
+from core.config import settings
 from services import conversation as conversation_service
 from services import rag as rag_service
 from services.chat_cache import append_stream_chunk, clear_stream
+from services.credits import deduct_credits,get_credits, mark_subcription_end
 
 logger = logging.getLogger(__name__)
 
@@ -302,6 +304,13 @@ async def websocket_chat_endpoint(
     async with AsyncSessionLocal() as db:
         try:
             current_user = await get_current_user(token, db)
+            
+            if  await get_credits(current_user.id, db) < settings.CREDIT_COST_CHAT:
+                await mark_subcription_end(current_user.id,db)
+                await websocket.send_text(
+                    json.dumps({"type": "error", "detail": "Buy supscription to continue with the chats"})
+                )
+                
             _convo = await conversation_service.get_conversation_list_for_user(
                 chat_list_id, current_user.id, db
             )
@@ -310,6 +319,7 @@ async def websocket_chat_endpoint(
                 conversation_type=_convo.conversation_type,
                 file_id=_convo.file_id,
                 user_id=_convo.user_id,
+                shared_conversation_id=_convo.shared_conversation_id,
             )
         except HTTPException:
             await websocket.close(code=4401)
@@ -339,6 +349,15 @@ async def websocket_chat_endpoint(
             question = data.statement.strip()
             if not question:
                 continue
+
+            async with AsyncSessionLocal() as credit_db:
+                try:
+                    await deduct_credits(convo.user_id, settings.CREDIT_COST_CHAT, credit_db)
+                except HTTPException as exc:
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "detail": exc.detail})
+                    )
+                    continue
 
             # Broadcast user's message to the room before streaming so other tabs see it immediately
             await manager.broadcast(chat_list_id, {

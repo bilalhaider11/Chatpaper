@@ -83,3 +83,5 @@ watchdog>=4.0.0
 
 fastapi-mail>=1.6.4
 sentence-transformers>=2.7.0
+
+stripe>=15.2.1

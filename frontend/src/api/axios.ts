@@ -11,6 +11,7 @@ export type User = {
   role: string;
   is_active: boolean;
   auth_provider?: string;
+  credits?: number;
 };
 
 export const api = axios.create({

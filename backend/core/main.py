@@ -24,6 +24,7 @@ from .admin import (
     ConversationListAdmin, MessageAdmin, authentication_backend,
 )
 from services.messaging import start_messaging, stop_messaging
+from services.credits_sync import start_credits_sync, stop_credits_sync
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,7 +36,9 @@ async def lifespan(app: FastAPI):
         await asyncio.to_thread(command.upgrade, cfg, "head")
     await start_redis()
     await start_messaging()
+    await start_credits_sync()
     yield
+    await stop_credits_sync()
     await stop_messaging()
     await stop_redis()
 

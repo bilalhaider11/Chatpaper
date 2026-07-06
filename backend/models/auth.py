@@ -19,6 +19,7 @@ class User(CommonModel):
     auth_provider = Column(String, nullable=False, server_default="password")
 
     role = Column(Enum(UserRole), default=UserRole.user)
+    credits = Column(Integer, nullable=True, default=0)
     
     __table_args__ = (
         CheckConstraint('char_length(password) >= 8', name='password_min_length'),

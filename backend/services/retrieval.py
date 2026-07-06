@@ -48,7 +48,7 @@ async def all_files_when_shared_global(user_id:int, conversationlist_id:int,db: 
         .where(CombinedSharedConversationImport.id == conversationlist_id)
     )
     
-    return list(result.scalars().all())
+    return result.scalars().all()[0]
     
 
 async def _global_accessible_file_ids(user_id: int, db: AsyncSession) -> list[int]:
@@ -70,6 +70,7 @@ async def _resolve_retrieval_scope(
     user_id: int,
     conversation_type:str,
     conversationlist_id:int,
+    shared_conversation_id:int,
     file_ids: list[int] | None,
     db: AsyncSession,
 ) -> tuple[list[int], list[int] | None]:
@@ -82,7 +83,7 @@ async def _resolve_retrieval_scope(
     if file_ids is None and conversation_type == "global":
         scoped_file_ids = await _global_accessible_file_ids(user_id, db)
     elif file_ids is None and conversation_type =="shared global":
-        scoped_file_ids = await all_files_when_shared_global(user_id,conversationlist_id, db)
+        scoped_file_ids = await all_files_when_shared_global(user_id,shared_conversation_id, db)
     else:
         scoped_file_ids = file_ids
 
@@ -225,6 +226,7 @@ async def retrieve(
     user_id: int,
     conversation_type:str,
     conversationlist_id:int,
+    shared_conversation_id:int,
     db: AsyncSession,
     file_ids: list[int] | None = None,
     top_k: int = 5,
@@ -234,7 +236,7 @@ async def retrieve(
 ) -> list[RetrievedContext]:
     embedder = get_embedder()
     query_embedding = await embedder.aembed_query(query)
-    vector_user_id, scoped_file_ids = await _resolve_retrieval_scope(user_id,conversation_type, conversationlist_id,file_ids, db)
+    vector_user_id, scoped_file_ids = await _resolve_retrieval_scope(user_id,conversation_type, conversationlist_id,shared_conversation_id,file_ids, db)
     if scoped_file_ids is not None and not scoped_file_ids:
         return []
 

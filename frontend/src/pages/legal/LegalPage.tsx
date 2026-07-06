@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import logo from "../../assets/logo.png";
+import { Navbar } from "../../components/Navbar";
 import "./LegalPage.css";
 
 type Section = {
@@ -17,15 +17,7 @@ type LegalPageProps = {
 function LegalPage({ title, subtitle, lastUpdated, sections }: LegalPageProps) {
   return (
     <div className="legal-root">
-      <nav className="legal-nav">
-        <div className="legal-nav-inner">
-          <Link to="/" className="legal-nav-brand">
-            <img src={logo} alt="Chatpaper logo" className="legal-nav-logo" />
-            <span className="legal-nav-name">Chatpaper</span>
-          </Link>
-          <Link to="/login" className="legal-nav-back">← Back to app</Link>
-        </div>
-      </nav>
+      <Navbar variant="legal" />
 
       <main className="legal-main">
         <div className="legal-inner">
