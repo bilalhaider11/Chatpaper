@@ -60,7 +60,6 @@
     margin-bottom: 12px;
 }
 
-.global-conversation-list,
 .shared-conversation-list {
     display: flex;
     flex-direction: column;
@@ -111,6 +110,10 @@
 .sidebar-shared-pane {
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     padding-top: 4px;
+}
+
+.global-conversation-list {
+    padding-bottom: 4px;
 }
 
 .sidebar-empty--compact {

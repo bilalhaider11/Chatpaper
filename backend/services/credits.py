@@ -87,7 +87,11 @@ async def set_credits(user_id: int, amount: int, db: AsyncSession) -> int:
     )
     await db.commit()
     return amount
-
+async def invalidate_credits_cache(user_id: int) -> None:
+    redis = get_redis()
+    if redis is not None:
+        await redis.delete(_credits_key(user_id))
+        
 async def update_cancel_subscription(cancelled:bool, user:User,db:AsyncSession):
     await db.execute(
         update(Subscription).where(Subscription.user_id == user.id).values(cancel_subscription=cancelled)

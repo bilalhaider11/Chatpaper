@@ -7,7 +7,7 @@ from core.config import settings
 from core.database import SessionLocal
 from core.redis_client import get_redis
 from models.auth import User
-from services.credits import CREDITS_DIRTY_SET, CREDITS_KEY_PREFIX
+from services.credits import CREDITS_DIRTY_SET, CREDITS_KEY_PREFIX, invalidate_credits_cache
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,7 @@ async def flush_credits_to_db() -> int:
     count = await asyncio.to_thread(_persist, updates)
     for user_id, _ in updates:
         await redis.srem(CREDITS_DIRTY_SET, str(user_id))
+        await invalidate_credits_cache(user_id)
 
     logger.info("Flushed credits for %s user(s) to database", count)
     return count

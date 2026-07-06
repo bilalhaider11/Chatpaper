@@ -9,8 +9,13 @@ from models.conversation import (
     CombinedSharedConversationImport,
 )
 from models.file_model import FileRecord
-from schema.conversation import ConversationCreateRequest
-from services.chat_cache import get_active_streams, get_pending_messages
+from schema.conversation import ConversationCreateRequest, PaginatedConversationResponse
+from services.chat_cache import (
+    get_active_streams,
+    get_cached_conversation_messages,
+    get_pending_messages,
+    set_cached_conversation_messages,
+)
 from core.config import settings
 
 
@@ -224,37 +229,94 @@ async def get_chat_shared(shared_id: int, user, db: AsyncSession) -> dict:
     }
 
 
-async def get_conversations(chat_list_id, db: AsyncSession, limit: int = 50, offset: int = 0):
+def _conversation_to_cache_dict(conversation: Conversation) -> dict:
+    return {
+        "id": conversation.id,
+        "chat_id": conversation.chat_id,
+        "user_type": conversation.user_type,
+        "statement": conversation.statement,
+        "created_at":conversation.created_at,
+    }
+
+
+def _cache_dict_to_conversation(data: dict) -> Conversation:
+    return Conversation(
+        id=data.get("id"),
+        chat_id=data.get("chat_id"),
+        user_type=data["user_type"],
+        statement=data["statement"],
+        created_at=data["created_at"],
+    )
+
+
+async def _get_merged_messages_cached(chat_list_id: int, db: AsyncSession) -> list[Conversation]:
+    cached = await get_cached_conversation_messages(chat_list_id)
+    if cached is not None:
+        return [_cache_dict_to_conversation(item) for item in cached]
+
+    conversations = await get_merged_messages(chat_list_id, db)
+    await set_cached_conversation_messages(
+        chat_list_id,
+        [_conversation_to_cache_dict(item) for item in conversations],
+    )
+
+    return conversations
+
+
+async def get_conversations(
+    chat_list_id: int,
+    db: AsyncSession,
+    limit: int | None = None,
+    page: int = 0,
+) -> PaginatedConversationResponse:
     if not chat_list_id:
         raise HTTPException(status_code=400, detail="Chat does not exist")
 
-    conversations = await get_merged_messages(chat_list_id, db)
-    conversations = conversations[offset : offset + limit]
+    page_size = limit or settings.chat_conversation_page_size
+    if page < 0:
+        raise HTTPException(status_code=400, detail="Page must be >= 0")
 
-    # Pending and in-flight stream messages are the "leading edge" of the conversation;
-    # only attach them on the first page to avoid duplicating them across paginated requests.
-    if offset == 0:
+    all_conversations = await _get_merged_messages_cached(chat_list_id, db)
+    total = len(all_conversations)
+
+    end = total - page * page_size
+    start = max(0, end - page_size)
+    if end <= 0:
+        page_messages: list[Conversation] = []
+    else:
+        page_messages = list(all_conversations[start:end])
+
+    if page == 0:
         pending = await get_pending_messages(chat_list_id)
         streams = await get_active_streams(chat_list_id)
         for msg in pending:
-            conversations.append(
+            page_messages.append(
                 Conversation(
                     id=None,
                     chat_id=msg.chat_id,
                     user_type=msg.user_type,
                     statement=msg.statement,
+                    created_at=msg.created_at,
                 )
             )
         for stream in streams:
-            conversations.append(
+            page_messages.append(
                 Conversation(
                     id=None,
                     chat_id=chat_list_id,
                     user_type=stream["user_type"],
                     statement=stream["statement"],
+                    created_at=stream["created_at"]
                 )
             )
-    return conversations
+
+    return PaginatedConversationResponse(
+        messages=page_messages,
+        total=total,
+        page=page,
+        limit=page_size,
+        has_more=start > 0,
+    )
 
 
 async def get_conversation_list_for_user(chat_list_id: int, user_id: int, db: AsyncSession) -> ConversationList:

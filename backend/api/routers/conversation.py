@@ -8,7 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from services.messaging import handle_conversation_message
 from core.auth import get_current_user
 from core.database import AsyncSessionLocal
 from core.dependencies import get_db
@@ -20,8 +20,8 @@ from schema.conversation import (
     ChatWsSendPayload,
     ConversationCreateRequest,
     ConversationListResponse,
-    ConversationResponse,
     ImportSharedConversationResponse,
+    PaginatedConversationResponse,
     ShareConversationResponse,
 )
 from core.config import settings
@@ -117,16 +117,16 @@ async def get_conversation_list(
     return result.scalars().all()
 
 
-@router.get("/get-conversation/{chat_list_id}", response_model=list[ConversationResponse])
+@router.get("/get-conversation/{chat_list_id}", response_model=PaginatedConversationResponse)
 async def get_conversation(
     chat_list_id: int,
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=200),
+    page: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await _get_owned_convo(db, chat_list_id, current_user)
-    return await conversation_service.get_conversations(chat_list_id, db, limit=limit, offset=offset)
+    return await conversation_service.get_conversations(chat_list_id, db, limit=limit, page=page)
 
 @router.post("/share/{conversation_list_id}", response_model=ShareConversationResponse)
 async def share_conversation(
@@ -134,7 +134,6 @@ async def share_conversation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_convo(db, conversation_list_id, current_user)
     return await conversation_service.mark_chat_shared(conversation_list_id, current_user, db)
 
 
@@ -215,6 +214,12 @@ async def _handle_rag_stream(
     except RuntimeError:
         await websocket.send_text(json.dumps({"type": "error", "detail": "LLM unavailable"}))
         return
+    
+    await handle_conversation_message(
+        chat_id=chat_list_id,
+        user_type="user",
+        statement=question,
+    )
 
     # Phase 1: retrieve — use a short-lived session so the connection returns to pool during LLM call
     async with AsyncSessionLocal() as db:
@@ -273,12 +278,12 @@ async def _handle_rag_stream(
         "citations": [c.model_dump() for c in citations],
         "chat_id": chat_list_id,
     })
-
-    # Phase 3: atomic commit — both rows in one transaction, only after streaming completes
-    async with AsyncSessionLocal() as db:
-        db.add(Conversation(chat_id=chat_list_id, user_type="user", statement=question))
-        db.add(Conversation(chat_id=chat_list_id, user_type="assistant", statement=full_answer))
-        await db.commit()
+    
+    await handle_conversation_message(
+        chat_id=chat_list_id,
+        user_type="assistant",
+        statement=full_answer,
+    )
 
 
 @router.websocket("/ws/{chat_list_id}")

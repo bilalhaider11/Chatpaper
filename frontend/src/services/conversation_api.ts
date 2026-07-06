@@ -5,7 +5,18 @@ export type Conversation = {
   chat_id?: number;
   user_type: string;
   statement: string;
+  created_at: string;
 };
+
+export type PaginatedConversations = {
+  messages: Conversation[];
+  total: number;
+  page: number;
+  limit: number;
+  has_more: boolean;
+};
+
+export const CONVERSATION_PAGE_SIZE = 10;
 
 export type ConversationListItem = {
   id: number;
@@ -75,9 +86,14 @@ export async function getConversationList() {
   return response.data;
 }
 
-export async function getConversation(conversationListId: number) {
-  const response = await api.get<Conversation[]>(
-    `/conversation/get-conversation/${conversationListId}`
+export async function getConversation(
+  conversationListId: number,
+  page = 0,
+  limit = CONVERSATION_PAGE_SIZE
+) {
+  const response = await api.get<PaginatedConversations>(
+    `/conversation/get-conversation/${conversationListId}`,
+    { params: { page, limit } }
   );
   return response.data;
 }

@@ -12,6 +12,7 @@ import {
   ChatWsEvent,
   Conversation,
   ConversationListItem,
+  CONVERSATION_PAGE_SIZE,
   LiveMessage,
   createConversationList,
   deleteConversationList,
@@ -38,6 +39,9 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
   const [editTitle, setEditTitle] = useState("");
   const [isopen, setisopen] = useState(openUploadOnLoad);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLElement>(null);
+  const shouldScrollToBottomRef = useRef(true);
+  const loadingOlderRef = useRef(false);
   const [user, setUser] = useState<User | null>(null);
   const [input, setInput] = useState("");
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
@@ -52,6 +56,9 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
   // File status for the currently selected per-file conversation
   const [activeFileStatus, setActiveFileStatus] = useState<FileRecord | null>(null);
   const [messages, setMessages] = useState<Conversation[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [nextOlderPage, setNextOlderPage] = useState(1);
   const [liveMessages, setLiveMessages] = useState<LiveMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingChat, setCreatingChat] = useState(false);
@@ -60,6 +67,45 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
   const [shareLoading, setShareLoading] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
+
+  useEffect(() => {
+    loadingOlderRef.current = loadingOlder;
+  }, [loadingOlder]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!selectedConversationId || loadingOlderRef.current || !hasMoreOlder) return;
+
+    const container = messagesContainerRef.current;
+    const prevScrollHeight = container?.scrollHeight ?? 0;
+
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const data = await getConversation(selectedConversationId, nextOlderPage, CONVERSATION_PAGE_SIZE);
+      setMessages((prev) => [...data.messages, ...prev]);
+      setHasMoreOlder(data.has_more);
+      setNextOlderPage((page) => page + 1);
+      shouldScrollToBottomRef.current = false;
+
+      requestAnimationFrame(() => {
+        if (!container) return;
+        container.scrollTop = container.scrollHeight - prevScrollHeight;
+      });
+    } catch {
+      // ignore transient load errors; user can scroll again to retry
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [selectedConversationId, hasMoreOlder, nextOlderPage]);
+
+  const handleMessagesScroll = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container || loadingOlderRef.current || !hasMoreOlder) return;
+    if (container.scrollTop <= 80) {
+      void loadOlderMessages();
+    }
+  }, [hasMoreOlder, loadOlderMessages]);
 
   const isStreaming = liveMessages.some((m) => m.streaming);
 
@@ -76,8 +122,8 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
   const displayedMessages = useMemo(() => {
     const stripCitations = (text: string) => text.replace(/\s*\[\d+\]/g, "");
 
-    const persisted = messages.map((message) => ({
-      key: `db-${message.id}`,
+    const persisted = messages.map((message, index) => ({
+      key: message.id != null ? `db-${message.id}` : `db-idx-${index}`,
       user_type: normalizeUserType(message.user_type),
       statement: stripCitations(message.statement),
       streaming: false,
@@ -99,7 +145,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
     () =>
       conversations.filter(
         (c) =>
-          (c.conversation_type === "global" || c.conversation_type === "per_file") &&
+          ( c.conversation_type === "per_file") &&
           c.shared_conversation_id == null
       ),
     [conversations]
@@ -117,6 +163,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
 
   const handleWsEvent = useCallback((event: ChatWsEvent) => {
     if (event.type === "chunk") {
+      shouldScrollToBottomRef.current = true;
       setLiveMessages((prev) => {
         const existing = prev.find((m) => m.tempId === event.temp_id);
         if (existing) {
@@ -138,6 +185,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
         ];
       });
     } else if (event.type === "done") {
+      shouldScrollToBottomRef.current = true;
       setLiveMessages((prev) =>
         prev.map((m) =>
           m.tempId === event.temp_id
@@ -231,8 +279,13 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
         if (selectedConvRef.current === parsedId) return; // already on this conv
         try {
           setSelectedConversationId(parsedId);
-          const data = await getConversation(parsedId);
-          setMessages(data);
+          shouldScrollToBottomRef.current = true;
+          setHasMoreOlder(false);
+          setNextOlderPage(1);
+          setLoadingOlder(false);
+          const data = await getConversation(parsedId, 0, CONVERSATION_PAGE_SIZE);
+          setMessages(data.messages);
+          setHasMoreOlder(data.has_more);
           setLiveMessages([]);
           setWsError(null);
         } catch {
@@ -253,6 +306,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
   }, [urlId, loading, navigate, processingFile]);
 
   useEffect(() => {
+    if (!shouldScrollToBottomRef.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [displayedMessages]);
 
@@ -349,6 +403,8 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
       setSelectedConversationId(newConversation.id);
       selectedConvRef.current = newConversation.id;
       setMessages([]);
+      setHasMoreOlder(false);
+      setNextOlderPage(1);
       setLiveMessages([]);
       setWsError(null);
       navigate(`/chat/${newConversation.id}`);
@@ -391,6 +447,7 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
       { tempId: userTempId, user_type: "user" as const, statement: text },
     ]);
     setInput("");
+    shouldScrollToBottomRef.current = true;
 
     const sent = sendWsMessage(text);
     if (!sent) {
@@ -600,6 +657,11 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
       >
         <div className="sidebar-user-pane">
           <div className="sidebar-section-label">Conversations</div>
+          {globalConversations.length > 0 ? (
+          <nav className="global-conversation-list">
+            {globalConversations.map(renderConversationItem)}
+          </nav>
+        ) : null}
           <nav className="conversation-list conversation-list--pane">
             {userConversations.length === 0 ? (
               <p className="sidebar-empty">No conversations yet. Upload a document to begin.</p>
@@ -649,7 +711,14 @@ function Chatbot({ onLogout }: { onLogout: () => void }) {
           </div>
         </header>
 
-        <section className="chatbot-messages">
+        <section
+          className="chatbot-messages"
+          ref={messagesContainerRef}
+          onScroll={handleMessagesScroll}
+        >
+          {loadingOlder ? (
+            <div className="chatbot-load-older">Loading earlier messages…</div>
+          ) : null}
           {isopen ? (
             <FileUpload
               variant="modal"
