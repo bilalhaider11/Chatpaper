@@ -80,7 +80,7 @@ async def flush_buffer_to_db() -> int:
 
 async def _periodic_flush() -> None:
     while True:
-        await asyncio.sleep(50)
+        await asyncio.sleep(settings.chat_flush_interval_seconds)
         try:
             if await flush_queue_size() > 0:
                 await flush_buffer_to_db()
