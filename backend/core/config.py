@@ -15,12 +15,11 @@ class Settings(BaseModel):
     algorithm: str = os.getenv("ALGORITHM", "HS256")
     database: str = os.getenv("DATABASE", "")
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
-    
     chat_data_ttl_seconds:int = int(os.getenv("CHAT_DATA_TTL_SECONDS",'300'))
     chat_conversation_cache_ttl_seconds: int = int(
         os.getenv("CHAT_CONVERSATION_CACHE_TTL_SECONDS", "200")
     )
-    
+
     chat_conversation_page_size: int = int(os.getenv("CHAT_CONVERSATION_PAGE_SIZE", "10"))
     #email token for forgot password TTL
     email_token_ttl_in_seconds:int = int(os.getenv("EMAIL_TOKEN_TTL_IN_SECONDS",600))

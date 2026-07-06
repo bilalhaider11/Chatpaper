@@ -324,6 +324,7 @@ async def websocket_chat_endpoint(
                 conversation_type=_convo.conversation_type,
                 file_id=_convo.file_id,
                 user_id=_convo.user_id,
+                shared_conversation_id=_convo.shared_conversation_id,
             )
         except HTTPException:
             await websocket.close(code=4401)
