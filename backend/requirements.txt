@@ -51,6 +51,7 @@ pytesseract>=0.3.10
 python-magic>=0.4.27
 chardet>=5.2.0
 langdetect>=1.0.9
+langchain-huggingface>=1.2.2
 
 # ── Vector database ──────────────────────────────────────────────────────────
 chromadb>=0.5.0

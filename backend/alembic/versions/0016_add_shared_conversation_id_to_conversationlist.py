@@ -35,6 +35,12 @@ def upgrade() -> None:
             server_default=sa.func.now(),
             nullable=False,
         ),
+        sa.Column(
+            "file_ids",
+            sa.ARRAY(sa.Integer()),
+            nullable=True,
+            
+        ),
     )
     op.create_index(
         "ix_combined_shared_conversation_import_shared_chat_id",

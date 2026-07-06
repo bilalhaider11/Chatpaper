@@ -66,6 +66,13 @@ async def mark_chat_shared(conversation_list_id: int, user, db: AsyncSession) ->
     result = await db.execute(
         select(ConversationList).where(ConversationList.id == conversation_list_id)
     )
+    
+    file_ids = await db.execute(
+        select(ConversationList.file_id).where(ConversationList.user_id == user.id)
+    )
+    
+    unique_file_ids = list(set(fid for fid in file_ids.scalars().all() if fid is not None))
+    
     conversation = result.scalars().first()
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -79,7 +86,8 @@ async def mark_chat_shared(conversation_list_id: int, user, db: AsyncSession) ->
     combined_shared_conversation = CombinedSharedConversationImport(
         limit=message_count or 0,
         shared_user_id=user.id,
-        shared_chat_id=conversation_list_id
+        shared_chat_id=conversation_list_id,
+        file_ids = unique_file_ids if conversation.conversation_type == "global" else {},
     )
     db.add(combined_shared_conversation)
     await db.commit()

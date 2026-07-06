@@ -1,5 +1,5 @@
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, func
-
+from sqlalchemy.dialects.postgresql import ARRAY
 from core.database import Base
 
 
@@ -41,6 +41,11 @@ class CombinedSharedConversationImport(Base):
         ForeignKey("conversationlist.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+    file_ids = Column(
+        ARRAY(Integer),
+        nullable=False,
+        server_default="{}",
     )
     limit = Column(Integer, nullable=False)
     shared_user_id = Column(Integer, nullable=False)
