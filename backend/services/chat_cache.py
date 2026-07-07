@@ -95,6 +95,15 @@ class InMemoryChatCache:
                 pending.remove(serialized)
         return messages
 
+    async def drain_flush_queue_for_chat(self, chat_id: int) -> list[QueuedChatMessage]:
+        pending_payloads = self._pending.pop(chat_id, [])
+        if not pending_payloads:
+            return []
+
+        pending_set = set(pending_payloads)
+        self._flush_queue = [item for item in self._flush_queue if item not in pending_set]
+        return [_message_from_json(item) for item in pending_payloads]
+
     async def flush_queue_size(self) -> int:
         return len(self._flush_queue)
 
@@ -174,6 +183,25 @@ async def drain_flush_queue() -> list[QueuedChatMessage]:
         pipe.lrem(_pending_key(msg.chat_id), 1, _message_to_json(msg))
     await pipe.execute()
     return messages
+
+
+async def drain_flush_queue_for_chat(chat_id: int) -> list[QueuedChatMessage]:
+    """Remove and return queued messages for one chat from flush and pending queues."""
+    redis_client = get_redis()
+    if redis_client is None:
+        return await _memory_cache.drain_flush_queue_for_chat(chat_id)
+
+    pending_key = _pending_key(chat_id)
+    payloads = await redis_client.lrange(pending_key, 0, -1)
+    if not payloads:
+        return []
+
+    pipe = redis_client.pipeline()
+    for payload in payloads:
+        pipe.lrem(FLUSH_QUEUE_KEY, 0, payload)
+    pipe.delete(pending_key)
+    await pipe.execute()
+    return [_message_from_json(item) for item in payloads]
 
 
 async def flush_queue_size() -> int:

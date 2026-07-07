@@ -1,4 +1,6 @@
 from fastapi import HTTPException
+from datetime import datetime
+from services.chat_cache import _normalize_created_at
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_
@@ -16,6 +18,7 @@ from services.chat_cache import (
     get_pending_messages,
     set_cached_conversation_messages,
 )
+from services.messaging import flush_chat_pending_messages
 from core.config import settings
 
 
@@ -79,6 +82,8 @@ async def mark_chat_shared(conversation_list_id: int, user, db: AsyncSession) ->
     if conversation.conversation_type == "shared global" or conversation.conversation_type == "shared per_file":
         raise HTTPException(status_code=403, detail="Cannot share imported conversation")
     
+    await flush_chat_pending_messages(conversation_list_id)
+
     message_count = await db.scalar(
         select(func.count(Conversation.id)).where(Conversation.chat_id == conversation_list_id)
     )
@@ -228,6 +233,25 @@ async def get_chat_shared(shared_id: int, user, db: AsyncSession) -> dict:
         "messages_imported": shared_record.limit,
     }
 
+def _message_dedup_keys(
+    *,
+    user_type: str,
+    statement: str,
+    created_at: datetime | str | None,
+    temp_id: str | None = None,
+) -> list[tuple]:
+    keys = [
+        (
+            "content",
+            user_type,
+            statement,
+            _normalize_created_at(created_at),
+        )
+    ]
+    if temp_id:
+        keys.append(("temp_id", temp_id))
+    return keys
+
 
 def _conversation_to_cache_dict(conversation: Conversation) -> dict:
     return {
@@ -287,9 +311,27 @@ async def get_conversations(
         page_messages = list(all_conversations[start:end])
 
     if page == 0:
+        existing_keys: set[tuple] = set()
+        for c in all_conversations:
+            for key in _message_dedup_keys(
+                user_type=c.user_type,
+                statement=c.statement,
+                created_at=c.created_at,
+            ):
+                existing_keys.add(key)
         pending = await get_pending_messages(chat_list_id)
         streams = await get_active_streams(chat_list_id)
         for msg in pending:
+            msg_keys = _message_dedup_keys(
+                user_type=msg.user_type,
+                statement=msg.statement,
+                created_at=msg.created_at,
+                temp_id=msg.temp_id,
+            )
+            if any(key in existing_keys for key in msg_keys):
+                continue
+            for key in msg_keys:
+                existing_keys.add(key)
             page_messages.append(
                 Conversation(
                     id=None,
@@ -300,13 +342,23 @@ async def get_conversations(
                 )
             )
         for stream in streams:
+            stream_keys = _message_dedup_keys(
+                user_type=stream["user_type"],
+                statement=stream["statement"],
+                created_at=stream.get("created_at"),
+                temp_id=stream.get("temp_id"),
+            )
+            if any(key in existing_keys for key in stream_keys):
+                continue
+            for key in stream_keys:
+                existing_keys.add(key)
             page_messages.append(
                 Conversation(
                     id=None,
                     chat_id=chat_list_id,
                     user_type=stream["user_type"],
                     statement=stream["statement"],
-                    created_at=stream["created_at"]
+                    created_at=stream.get("created_at"),
                 )
             )
 

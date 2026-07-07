@@ -14,6 +14,7 @@ from models.conversation import Conversation
 from services.chat_cache import (
     QueuedChatMessage,
     drain_flush_queue,
+    drain_flush_queue_for_chat,
     enqueue_message,
     flush_queue_size,
     append_messages_to_cache,
@@ -30,6 +31,7 @@ _connection: aio_pika.RobustConnection | None = None
 _channel: aio_pika.RobustChannel | None = None
 _consumer_task: asyncio.Task | None = None
 _flush_task: asyncio.Task | None = None
+_flush_lock = asyncio.Lock()
 
 
 def _parse_created_at(value: datetime | str | None) -> datetime | None:
@@ -60,22 +62,48 @@ def bulk_insert_messages(db: Session, messages: list[QueuedChatMessage]) -> list
 
 
 async def flush_buffer_to_db() -> int:
-    batch = await drain_flush_queue()
+    async with _flush_lock:
+        batch = await drain_flush_queue()
 
-    if not batch:
-        return 0
+        if not batch:
+            return 0
 
-    def _persist() -> int:
-        db = SessionLocal()
-        try:
-            bulk_insert_messages(db, batch)
-            return len(batch)
-        finally:
-            db.close()
+        def _persist() -> int:
+            db = SessionLocal()
+            try:
+                bulk_insert_messages(db, batch)
+                return len(batch)
+            finally:
+                db.close()
 
-    count = await asyncio.to_thread(_persist)
-    logger.info("Flushed %s chat messages to database", count)
-    return count
+        count = await asyncio.to_thread(_persist)
+        logger.info("Flushed %s chat messages to database", count)
+        return count
+
+
+async def flush_chat_pending_messages(chat_id: int) -> int:
+    """Persist queued messages for one chat and remove them from the flush queue."""
+    async with _flush_lock:
+        batch = await drain_flush_queue_for_chat(chat_id)
+
+        if not batch:
+            return 0
+
+        def _persist() -> int:
+            db = SessionLocal()
+            try:
+                bulk_insert_messages(db, batch)
+                return len(batch)
+            finally:
+                db.close()
+
+        count = await asyncio.to_thread(_persist)
+        logger.info(
+            "Flushed %s pending chat messages to database for chat_id=%s",
+            count,
+            chat_id,
+        )
+        return count
 
 
 async def _periodic_flush() -> None:
@@ -113,9 +141,6 @@ async def publish_chat_message(
 
     await enqueue_message(queued)
 
-    if _channel is None:
-        return
-
     payload = {
         "chat_id": chat_id,
         "user_type": user_type,
@@ -124,6 +149,10 @@ async def publish_chat_message(
         "created_at": queued.created_at.isoformat(),
     }
     await append_messages_to_cache(chat_id, [payload])
+
+    if _channel is None:
+        return
+
     await _channel.default_exchange.publish(
         aio_pika.Message(
             body=json.dumps(payload).encode(),
